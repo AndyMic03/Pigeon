@@ -3,7 +3,16 @@
  * All rights reserved
  */
 
-import {nameBeautifier, runQuery, sleep, tabsInserter} from "./utils.js"
+import {
+    arrayMaker,
+    getCombinations,
+    nameBeautifier,
+    queryMaker,
+    runQuery,
+    singularize,
+    sleep,
+    tabsInserter
+} from "./utils.js"
 import {types} from "./maps.js"
 import fs from "node:fs";
 import * as path from "node:path";
@@ -176,11 +185,21 @@ async function exec(): Promise<void> {
             throw "SQL Error";
 
         let ts = "import {Client} from \"pg\";\n\n";
-        ts += pgDefinition(0);
+        ts += clientMaker(0);
         ts += "\n\n";
         ts += createClass(table.table_name, columnQuery.rows, pKeys, fKeyQuery.rows);
         ts += "\n\n";
         ts += createGetAll(table.table_schema, table.table_name, columnQuery.rows);
+        ts += "\n\n";
+
+        let keys = pKeys;
+        for (let fKey of fKeyQuery.rows)
+            keys.push(fKey.local_column.replaceAll(" ", ""));
+        const keyCombinations = getCombinations(keys);
+        for (const keys of keyCombinations) {
+            ts += createGet(table.table_schema, table.table_name, columnQuery.rows, keys);
+            ts += "\n\n";
+        }
 
         fs.writeFileSync("../gen/" + table.table_schema + "/" + table.table_name + ".ts", ts);
     }
@@ -188,7 +207,7 @@ async function exec(): Promise<void> {
 
 function createClass(tableName: string, columns: any[], primaryKeys: string[], foreignKeys: any[]): string {
     let text = "";
-    text += "export class " + nameBeautifier(tableName).replaceAll(" ", "") + " {\n";
+    text += "export class " + singularize(nameBeautifier(tableName)).replaceAll(" ", "") + " {\n";
     for (const column of columns) {
         let dataType = types.get(column.data_type);
         if (column.is_nullable == "YES")
@@ -261,7 +280,7 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
     return text;
 }
 
-function pgDefinition(baseTabs: number): string {
+export function clientMaker(baseTabs: number): string {
     let text: string = "";
     text += tabsInserter(baseTabs) + "const client = new Client({\n";
     text += tabsInserter(baseTabs + 1) + "host: \"" + host + "\",\n";
@@ -275,26 +294,66 @@ function pgDefinition(baseTabs: number): string {
 
 function createGetAll(tableSchema: string, tableName: string, columns: any[]): string {
     let text = "";
-    const className = nameBeautifier(tableName).replaceAll(" ", "");
-    const varName = className[0].toLowerCase() + className.substring(1);
-    text += "export async function getAll" + className + "(): Promise<" + className + "[] | undefined> {\n";
-    text += "\tlet " + varName + "Query;\n";
-    text += "\ttry {\n";
-    text += "\t\tawait client.connect();\n";
-    text += "\t\t" + varName + "Query = await client.query(`SELECT * FROM " + tableSchema + "." + tableName + "`);\n";
-    text += "\t} catch (error: any) {\n";
-    text += "\t\tthrow error;\n";
-    text += "\t} finally {\n";
-    text += "\t\tawait client.end();\n";
-    text += "\t}\n\n";
-    text += "\tlet " + varName + ": " + className + "[] = [];\n";
-    text += "\tfor (const row of " + varName + "Query.rows)\n";
-    text += "\t\t" + varName + ".push(new " + className + "(\n";
-    for (const column of columns)
-        text += "\t\t\trow." + column.column_name + ",\n";
-    text = text.slice(0, -2);
-    text += "\n\n\t\t));\n";
+    const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
+    const varName = nameBeautifier(tableName).replaceAll(" ", "")[0].toLowerCase() + nameBeautifier(tableName).replaceAll(" ", "").substring(1);
+    text += "/**\n";
+    text += " * Gets all " + className + " objects from the server.\n";
+    text += " *\n";
+    text += " * @returns {Promise<" + className + "[]>} - A Promise object returning an array of " + nameBeautifier(tableName) + ".\n";
+    text += " */\n";
+    text += "export async function getAll" + nameBeautifier(tableName).replaceAll(" ", "") + "(): Promise<" + className + "[]> {\n";
+    text += queryMaker(1, varName, "SELECT * FROM " + tableSchema + "." + tableName, "");
+    text += "\n\n";
+    text += arrayMaker(1, varName, className, columns) + "\n";
+    text += "\treturn " + varName + ";\n";
+    text += "}";
+    return text;
+}
 
+function createGet(tableSchema: string, tableName: string, columns: any[], keys: string[]): string {
+    let text = "";
+    const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
+    const varName = nameBeautifier(tableName).replaceAll(" ", "")[0].toLowerCase() + nameBeautifier(tableName).replaceAll(" ", "").substring(1);
+    text += "/**\n";
+    text += " * Gets " + className + " objects from the server by ";
+    for (const key of keys)
+        text += key + " and ";
+    text = text.slice(0, -5) + ".\n";
+    text += " *\n";
+    for (const key of keys) {
+        const column = columns.find(column => column.column_name == key);
+        text += " * ";
+        text += "@param {" + types.get(column.data_type);
+        text += "} " + column.column_name;
+        text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table. \n";
+    }
+    text += " * @returns {Promise<" + className + "[]>} - A Promise object returning an array of " + nameBeautifier(tableName) + ".\n";
+    text += " */\n";
+    text += "export async function get" + nameBeautifier(tableName).replaceAll(" ", "") + "By";
+    for (const key of keys)
+        text += nameBeautifier(key).replaceAll(" ", "") + "And";
+    text = text.slice(0, -3);
+    text += "(";
+    for (const key of keys)
+        text += key + ": " + types.get(columns.find(column => column.column_name == key).data_type) + ", ";
+    text = text.slice(0, -2);
+    text += "): Promise<" + className + "[]> {\n";
+    text += "\tif (";
+    for (const key of keys)
+        text += key + " === undefined || ";
+    text = text.slice(0, -4);
+    text += ")\n" + "\t\tthrow \"Missing Parameters\";\n\n";
+    let query = "SELECT * FROM " + tableSchema + "." + tableName + " WHERE ";
+    let parameters = "";
+    for (let i = 0; i < keys.length; i++) {
+        query += keys[i] + " = " + "$" + (i + 1) + "::" + columns.find(column => column.column_name == keys[i]).data_type + " AND ";
+        parameters += keys[i] + ", ";
+    }
+    query = query.slice(0, -5);
+    parameters = parameters.slice(0, -2);
+    text += queryMaker(1, varName, query, parameters);
+    text += "\n\n";
+    text += arrayMaker(1, varName, className, columns) + "\n";
     text += "\t return " + varName + ";\n";
     text += "}";
     return text;

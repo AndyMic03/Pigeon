@@ -75,3 +75,66 @@ export function tabsInserter(tabNumber: number): string {
         tabs += "\t";
     return tabs;
 }
+
+export function queryMaker(baseTabs: number, variableName: string, command: string, parameters: string): string {
+    let query: string = "";
+    query += tabsInserter(baseTabs) + "let " + variableName + "Query;\n";
+    query += tabsInserter(baseTabs) + "try {\n";
+    query += tabsInserter(baseTabs + 1) + "await client.connect();\n";
+    query += tabsInserter(baseTabs + 1) + variableName + "Query = await client.query(`\n";
+    query += tabsInserter(baseTabs + 2) + command + "\n";
+    query += tabsInserter(baseTabs + 1) + "`, [" + parameters + "]);\n";
+    query += tabsInserter(baseTabs) + "} catch (error: any) {\n";
+    query += tabsInserter(baseTabs + 1) + "throw error;\n";
+    query += tabsInserter(baseTabs) + "} finally {\n";
+    query += tabsInserter(baseTabs + 1) + "await client.end();\n";
+    query += tabsInserter(baseTabs) + "}";
+    return query;
+}
+
+export function arrayMaker(baseTabs: number, variableName: string, className: string, columns: any[]): string {
+    let array: string = "";
+    array += tabsInserter(baseTabs) + "let " + variableName + ": " + className + "[] = [];\n";
+    array += tabsInserter(baseTabs) + "for (const row of " + variableName + "Query.rows)\n";
+    array += tabsInserter(baseTabs + 1) + variableName + ".push(new " + className + "(\n";
+    for (const column of columns)
+        array += tabsInserter(baseTabs + 2) + "row." + column.column_name + ",\n";
+    array = array.slice(0, -2) + "\n";
+    array += tabsInserter(baseTabs + 1) + "));";
+    return array;
+}
+
+export function singularize(word: string) {
+    const endings: { [key: string]: string } = {
+        ves: "fe",
+        ies: "y",
+        i: "us",
+        zes: "ze",
+        ses: "s",
+        es: "e",
+        s: ""
+    };
+    return word.replace(
+        new RegExp(`(${Object.keys(endings).join('|')})$`),
+        r => endings[r]
+    );
+}
+
+export function getCombinations(valuesArray: string[]): string[][] {
+    let combinations: string[][] = [];
+    let temp: string[] = [];
+    let possibleCombinations = Math.pow(2, valuesArray.length);
+
+    for (let i = 0; i < possibleCombinations; i++) {
+        temp = [];
+        for (let j = 0; j < valuesArray.length; j++)
+            if ((i & Math.pow(2, j)))
+                temp.push(valuesArray[j]);
+
+        if (temp.length > 0)
+            combinations.push(temp);
+    }
+
+    combinations.sort((a, b) => a.length - b.length);
+    return combinations;
+}
