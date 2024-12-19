@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2024 Andreas Michael
+ * This software is under the Apache 2.0 License
+ */
+
 export const types = new Map<string, string>([
     ["bigint", "number"],
     ["int8", "number"],

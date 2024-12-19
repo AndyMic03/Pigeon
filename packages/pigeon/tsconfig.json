@@ -12,6 +12,7 @@
     ]
   },
   "include": [
-    "packages/**/*.ts"
+    "bin/*.ts",
+    "src/*.ts"
   ]
 }
