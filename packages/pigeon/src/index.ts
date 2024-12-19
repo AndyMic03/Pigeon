@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2024. Andreas Michael
- * All rights reserved
+ * Copyright (c) 2024 Andreas Michael
+ * This software is under the Apache 2.0 License
  */
 
 import {
@@ -20,37 +20,41 @@ import prompt from "prompt-sync";
 
 function createDir(dirPath: string) {
     if (fs.existsSync(dirPath))
-        fs.readdir(dirPath, (err, files) => {
-            if (err)
-                throw err;
-            for (const file of files) {
-                const dir = path.join(dirPath, file);
-                if (fs.lstatSync(dir).isDirectory())
-                    fs.rm(dir, {recursive: true, force: true}, (err) => {
-                        if (err) throw err;
-                    })
-                else
-                    fs.unlink(path.join(dirPath, file), (err) => {
-                        if (err)
-                            throw err;
-                    });
-            }
-        });
+        return {
+            exitCode: 1,
+            message: null,
+            error: new Error("Generation directory already exists. Add the --force flag if you want to overwrite it.")
+        }
     else
         fs.mkdir(dirPath, (err) => {
-            if (err) throw err;
+            if (err) return {
+                exitCode: 1,
+                message: null,
+                error: err
+            }
         });
+    return {
+        exitCode: 0,
+        message: null,
+        error: null
+    }
 }
 
-createDir("../gen");
+export function deleteDir(dirPath: string) {
+    if (fs.existsSync(dirPath)) {
+        const files = fs.readdirSync(dirPath);
+        for (const file of files) {
+            const dir = path.join(dirPath, file);
+            if (fs.lstatSync(dir).isDirectory())
+                fs.rmSync(dir, {recursive: true, force: true});
+            else
+                fs.unlinkSync(path.join(dirPath, file));
+        }
+        fs.rmSync(dirPath, {recursive: true, force: true});
+    }
+}
 
-let host: string;
-let port: number;
-let db: string;
-let user: string;
-let pass: string;
-
-function init() {
+export function guided() {
     const logo =
         `                              @@@@@@@@  
                             @@@@@@@@@@@ 
@@ -77,20 +81,22 @@ function init() {
     console.log("\n");
     sleep(1000);
     const input = prompt({sigint: true});
-    host = input("Database Host: ");
-    port = Number(input("Database Port: "));
-    db = input("Database Name: ");
-    user = input("Database Username: ");
-    pass = input("Database Password: ");
-
-    exec().then(() => {
-        return;
-    });
+    const host = input("Database Host: ");
+    const port = Number(input("Database Port: "));
+    const db = input("Database Name: ");
+    const user = input("Database Username: ");
+    const pass = input("Database Password: ");
+    return {host, port, db, user, pass};
 }
 
-init();
-
-async function exec(): Promise<void> {
+export async function runPigeon(dir: string, host: string, port: number, db: string, user: string, pass: string): Promise<{
+    exitCode: number,
+    message: string | null,
+    error: Error | null
+}> {
+    const dirResult = createDir(dir);
+    if (dirResult.exitCode !== 0)
+        return dirResult;
     const tableQuery = await runQuery(
         `SELECT table_schema, table_name
          FROM information_schema.tables
@@ -105,7 +111,11 @@ async function exec(): Promise<void> {
         pass
     );
     if (typeof tableQuery === "undefined")
-        throw "SQL Error";
+        return {
+            exitCode: 1,
+            message: null,
+            error: new Error("An SQL error has occurred.")
+        }
 
     let schemas: string[] = [];
     for (const table of tableQuery.rows) {
@@ -113,9 +123,8 @@ async function exec(): Promise<void> {
             continue;
         schemas.push(table.table_schema);
     }
-    for (const schema of schemas) {
-        createDir("../gen/" + schema);
-    }
+    for (const schema of schemas)
+        createDir(path.join(dir, schema));
 
     for (const table of tableQuery.rows) {
         const columnQuery = await runQuery(
@@ -131,7 +140,11 @@ async function exec(): Promise<void> {
             pass
         );
         if (typeof columnQuery === "undefined")
-            throw "SQL Error";
+            return {
+                exitCode: 1,
+                message: null,
+                error: new Error("An SQL error has occurred.")
+            }
 
         const pKeyQuery = await runQuery(
             `SELECT ku.column_name
@@ -149,7 +162,12 @@ async function exec(): Promise<void> {
             pass
         );
         if (typeof pKeyQuery === "undefined")
-            throw "SQL Error";
+            return {
+                exitCode: 1,
+                message: null,
+                error: new Error("An SQL error has occurred.")
+            }
+
         let pKeys: string[] = []
         for (let pKey of pKeyQuery.rows)
             pKeys.push(pKey.column_name);
@@ -182,10 +200,14 @@ async function exec(): Promise<void> {
             pass
         );
         if (typeof fKeyQuery === "undefined")
-            throw "SQL Error";
+            return {
+                exitCode: 1,
+                message: null,
+                error: new Error("An SQL error has occurred.")
+            }
 
         let ts = "import {Client} from \"pg\";\n\n";
-        ts += clientMaker(0);
+        ts += clientMaker(0, host, port, db, user, pass);
         ts += "\n\n";
         ts += createClass(table.table_name, columnQuery.rows, pKeys, fKeyQuery.rows);
         ts += "\n\n";
@@ -201,7 +223,12 @@ async function exec(): Promise<void> {
             ts += "\n\n";
         }
 
-        fs.writeFileSync("../gen/" + table.table_schema + "/" + table.table_name + ".ts", ts);
+        fs.writeFileSync(path.join(dir, table.table_schema, table.table_name + ".ts"), ts);
+    }
+    return {
+        exitCode: 0,
+        message: "Generation Completed Successfully",
+        error: null
     }
 }
 
@@ -280,7 +307,7 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
     return text;
 }
 
-export function clientMaker(baseTabs: number): string {
+export function clientMaker(baseTabs: number, host: string, port: number, db: string, user: string, pass: string): string {
     let text: string = "";
     text += tabsInserter(baseTabs) + "const client = new Client({\n";
     text += tabsInserter(baseTabs + 1) + "host: \"" + host + "\",\n";

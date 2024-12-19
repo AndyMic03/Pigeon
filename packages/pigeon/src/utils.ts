@@ -1,9 +1,11 @@
 /*
- * Copyright (c) 2024. Andreas Michael
- * All rights reserved
+ * Copyright (c) 2024 Andreas Michael
+ * This software is under the Apache 2.0 License
  */
 
-import {Client} from "pg";
+import pg from 'pg';
+
+const {Client} = pg;
 
 export async function runQuery(command: string, parameters: any[], host: string, port: number, db: string, username: string, password: string): Promise<any | undefined> {
     const client = new Client({

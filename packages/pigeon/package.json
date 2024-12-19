@@ -1,0 +1,38 @@
+{
+  "name": "@andymic/pigeon",
+  "version": "1.0.0",
+  "author": "Andreas Michael <ateasm03@gmail.com>",
+  "description": "Pigeon is a TypeScript-based tool for generating TypeScript classes and methods from PostgreSQL database schemas.",
+  "keywords": [
+    "pg",
+    "postgres",
+    "build-tool",
+    "generator"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AndyMic03/Pigeon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AndyMic03/Pigeon/issues"
+  },
+  "homepage": "https://github.com/AndyMic03/Pigeon",
+  "main": "dist/index.js",
+  "bin": "dist/index.js",
+  "type": "module",
+  "files": [
+    "bin/",
+    "src/"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "watch": "tsc --build --watch"
+  },
+  "dependencies": {
+    "meow": "^13.2.0",
+    "pg": "^8.13.1",
+    "prompt-sync": "^4.2.0"
+  }
+}
