@@ -128,7 +128,7 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
 
     for (const table of tableQuery.rows) {
         const columnQuery = await runQuery(
-            `SELECT column_name, data_type, is_nullable, column_default
+            `SELECT *
              FROM information_schema.columns
              WHERE table_name = $1::varchar
                AND table_schema = $2::varchar;`,
@@ -167,8 +167,7 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
                 message: null,
                 error: new Error("An SQL error has occurred.")
             }
-
-        let pKeys: string[] = []
+        let pKeys: string[] = [];
         for (let pKey of pKeyQuery.rows)
             pKeys.push(pKey.column_name);
 
@@ -206,22 +205,78 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
                 error: new Error("An SQL error has occurred.")
             }
 
-        let ts = "import {Client} from \"pg\";\n\n";
-        ts += clientMaker(0, host, port, db, user, pass);
+        let ts = clientMaker(0, host, port, db, user, pass);
         ts += "\n\n";
         ts += createClass(table.table_name, columnQuery.rows, pKeys, fKeyQuery.rows);
         ts += "\n\n";
         ts += createGetAll(table.table_schema, table.table_name, columnQuery.rows);
         ts += "\n\n";
 
-        let keys = pKeys;
+        let keys = [...pKeys];
         for (let fKey of fKeyQuery.rows)
             keys.push(fKey.local_column.replaceAll(" ", ""));
-        const keyCombinations = getCombinations(keys);
-        for (const keys of keyCombinations) {
-            ts += createGet(table.table_schema, table.table_name, columnQuery.rows, keys);
+        for (const keyCombination of getCombinations(keys)) {
+            ts += createGet(table.table_schema, table.table_name, columnQuery.rows, keyCombination);
             ts += "\n\n";
         }
+
+        let nonDefaults = [];
+        let softDefaults = [];
+        let hardDefaults = [];
+        for (const column of columnQuery.rows) {
+            if (column.column_default === null && column.is_identity === "NO")
+                nonDefaults.push(column);
+            if ((column.column_default !== null && !column.column_default.includes("nextval")) || (column.is_identity === "YES" && column.identity_generation === "BY DEFAULT"))
+                softDefaults.push(column);
+            if ((column.column_default !== null && column.column_default.includes("nextval")) || (column.is_identity === "YES" && column.identity_generation === "ALWAYS"))
+                hardDefaults.push(column);
+        }
+
+        ts += createAdd(table.table_schema, table.table_name, nonDefaults, [], hardDefaults, fKeyQuery.rows) + "\n\n";
+        for (const softCombination of getCombinations(softDefaults))
+            ts += createAdd(table.table_schema, table.table_name, nonDefaults, softCombination, hardDefaults, fKeyQuery.rows) + "\n\n";
+
+        const regex = /import ({?.*?}?) from "(.*?)";\n/g;
+        let match;
+        let importObjects = [];
+
+        while ((match = regex.exec(ts)) !== null) {
+            ts = ts.replace(match[0], "");
+            let fileExists = false;
+            for (const object of importObjects) {
+                const isBrackets = match[1][0] === "{";
+                if (object.file === match[2] && isBrackets === object.brackets) {
+                    fileExists = true;
+                    object.functions.push(match[1]);
+                }
+            }
+            if (!fileExists) {
+                importObjects.push({
+                    file: match[2],
+                    functions: [match[1]],
+                    brackets: match[1][0] === "{"
+                });
+            }
+        }
+        let importString = "";
+        for (const object of importObjects) {
+            importString += "import ";
+            if (object.brackets)
+                importString += "{";
+            for (const fun of object.functions) {
+                if (object.brackets)
+                    importString += fun.slice(1, -1) + ", ";
+                else
+                    importString += fun + ", ";
+            }
+            importString = importString.slice(0, -2);
+            if (object.brackets)
+                importString += "}";
+            importString += " from \"" + object.file + "\";\n";
+        }
+        importString += "import pg from \"pg\";\n\n";
+        importString += "const {Client} = pg;\n\n";
+        ts = importString + ts;
 
         fs.writeFileSync(path.join(dir, table.table_schema, table.table_name + ".ts"), ts);
     }
@@ -324,7 +379,7 @@ function createGetAll(tableSchema: string, tableName: string, columns: any[]): s
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
     const varName = nameBeautifier(tableName).replaceAll(" ", "")[0].toLowerCase() + nameBeautifier(tableName).replaceAll(" ", "").substring(1);
     text += "/**\n";
-    text += " * Gets all " + className + " objects from the server.\n";
+    text += " * Gets all " + className + " objects from the database.\n";
     text += " *\n";
     text += " * @returns {Promise<" + className + "[]>} - A Promise object returning an array of " + nameBeautifier(tableName) + ".\n";
     text += " */\n";
@@ -342,7 +397,7 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
     const varName = nameBeautifier(tableName).replaceAll(" ", "")[0].toLowerCase() + nameBeautifier(tableName).replaceAll(" ", "").substring(1);
     text += "/**\n";
-    text += " * Gets " + className + " objects from the server by ";
+    text += " * Gets " + className + " objects from the database by ";
     for (const key of keys)
         text += key + " and ";
     text = text.slice(0, -5) + ".\n";
@@ -352,7 +407,7 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
         text += " * ";
         text += "@param {" + types.get(column.data_type);
         text += "} " + column.column_name;
-        text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table. \n";
+        text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table.\n";
     }
     text += " * @returns {Promise<" + className + "[]>} - A Promise object returning an array of " + nameBeautifier(tableName) + ".\n";
     text += " */\n";
@@ -381,7 +436,86 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
     text += queryMaker(1, varName, query, parameters);
     text += "\n\n";
     text += arrayMaker(1, varName, className, columns) + "\n";
-    text += "\t return " + varName + ";\n";
+    text += "\treturn " + varName + ";\n";
+    text += "}";
+    return text;
+}
+
+function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], softDefaults: any[], hardDefaults: any[], foreignKeys: any[]): string {
+    let text = "";
+    const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
+    for (const foreignKey of foreignKeys) {
+        text += "import {get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "} from \"."
+        if (tableSchema !== foreignKey.referenced_schema)
+            text += "./" + foreignKey.referenced_schema;
+        text += "/" + foreignKey.referenced_table + ".js\";\n";
+    }
+    text += "/**\n";
+    text += " * Adds the provided " + className + " object to the database.\n";
+    text += " *\n";
+    let columns = nonDefaults.concat(softDefaults);
+    columns.sort((a, b) => a.ordinal_position - b.ordinal_position);
+    for (const column of columns) {
+        text += " * ";
+        text += "@param {" + types.get(column.data_type);
+        if (column.is_nullable === "YES")
+            text += " | undefined";
+        text += "} " + column.column_name;
+        text += " - The " + nameBeautifier(column.column_name) + " to be inserted into the " + nameBeautifier(tableName) + " table.\n";
+    }
+    text += " * @returns {Promise<" + className + ">} - A Promise object returning the inserted " + nameBeautifier(tableName) + ".\n";
+    if (foreignKeys.length > 0) {
+        text += " * @throws string An exception in the case of the "
+        for (const foreignKey of foreignKeys)
+            text += nameBeautifier(foreignKey.local_column) + " or the "
+        text = text.slice(0, -8);
+        text += " not existing in their table.\n"
+    }
+    text += " */\n";
+    text += "export async function add" + className;
+    if (softDefaults.length > 0) {
+        text += "With";
+        for (const softDefault of softDefaults)
+            text += nameBeautifier(softDefault.column_name).replaceAll(" ", "") + "And";
+        text = text.slice(0, -3);
+    }
+    text += "(";
+    for (const column of columns) {
+        text += column.column_name + ": " + types.get(column.data_type);
+        if (column.is_nullable === "YES")
+            text += " | undefined";
+        text += ", ";
+    }
+    text = text.slice(0, -2);
+    text += "): Promise<" + className + "> {\n";
+    for (const foreignKey of foreignKeys) {
+        text += "\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
+        text += "\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
+        text += "\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n\n"
+    }
+    let query = "INSERT INTO " + tableSchema + "." + tableName + " (";
+    for (const column of columns)
+        query += column.column_name + ", ";
+    query = query.slice(0, -2);
+    query += ") VALUES (";
+    let parameters = "";
+    for (let i = 0; i < columns.length; i++) {
+        query += "$" + (i + 1) + "::" + columns[i].data_type + ", ";
+        parameters += columns[i].column_name + ", ";
+    }
+    query = query.slice(0, -2);
+    parameters = parameters.slice(0, -2);
+    query += ") RETURNING *;";
+    text += queryMaker(1, "insert", query, parameters);
+    text += "\n\n";
+    text += "\treturn new " + className + "(\n";
+    columns = columns.concat(hardDefaults);
+    columns.sort((a, b) => a.ordinal_position - b.ordinal_position);
+    for (const column of columns)
+        text += "\t\tinsertQuery.rows[0]." + column.column_name + ",\n";
+    text = text.slice(0, -2);
+    text += "\n";
+    text += "\t);\n";
     text += "}";
     return text;
 }

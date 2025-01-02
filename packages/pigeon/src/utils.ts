@@ -3,7 +3,7 @@
  * This software is under the Apache 2.0 License
  */
 
-import pg from 'pg';
+import pg from "pg";
 
 const {Client} = pg;
 
@@ -122,9 +122,9 @@ export function singularize(word: string) {
     );
 }
 
-export function getCombinations(valuesArray: string[]): string[][] {
-    let combinations: string[][] = [];
-    let temp: string[] = [];
+export function getCombinations(valuesArray: any[]): any[][] {
+    let combinations: any[][] = [];
+    let temp: any[] = [];
     let possibleCombinations = Math.pow(2, valuesArray.length);
 
     for (let i = 0; i < possibleCombinations; i++) {
