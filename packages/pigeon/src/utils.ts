@@ -84,7 +84,7 @@ export function queryMaker(baseTabs: number, variableName: string, command: stri
     query += tabsInserter(baseTabs) + "try {\n";
     query += tabsInserter(baseTabs + 1) + "await client.connect();\n";
     query += tabsInserter(baseTabs + 1) + variableName + "Query = await client.query(`\n";
-    query += tabsInserter(baseTabs + 2) + command + "\n";
+    query += queryBeautifier(baseTabs + 2, command);
     query += tabsInserter(baseTabs + 1) + "`, [" + parameters + "]);\n";
     query += tabsInserter(baseTabs) + "} catch (error: any) {\n";
     query += tabsInserter(baseTabs + 1) + "throw error;\n";
@@ -92,6 +92,32 @@ export function queryMaker(baseTabs: number, variableName: string, command: stri
     query += tabsInserter(baseTabs + 1) + "await client.end();\n";
     query += tabsInserter(baseTabs) + "}";
     return query;
+}
+
+function queryBeautifier(baseTabs: number, command: string): string {
+    const regex = /(?=((?:SELECT|INSERT|FROM|WHERE|AND|VALUES|RETURNING).*?)(?:FROM|WHERE|AND|VALUES|RETURNING|;))/g;
+    let match;
+    let lines = [];
+    while ((match = regex.exec(command)) !== null) {
+        lines.push(match[1]);
+        regex.lastIndex = regex.lastIndex + 1;
+    }
+    for (let i = 0; i < lines.length; i++)
+        if (lines[i][lines[i].length - 1] === " ")
+            lines[i] = lines[i].slice(0, -1);
+
+    lines[lines.length - 1] = lines[lines.length - 1] + ";";
+    let maxLength = 0;
+    for (const line of lines)
+        if (line.split(" ")[0].length > maxLength)
+            maxLength = line.split(" ")[0].length;
+    for (let i = 0; i < lines.length; i++)
+        if (lines[i].split(" ")[0].length < maxLength)
+            lines[i] = " ".repeat(maxLength - lines[i].split(" ")[0].length) + lines[i];
+    let formated = "";
+    for (const line of lines)
+        formated += tabsInserter(baseTabs) + line + "\n"
+    return formated;
 }
 
 export function arrayMaker(baseTabs: number, variableName: string, className: string, columns: any[]): string {

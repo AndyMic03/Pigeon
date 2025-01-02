@@ -384,7 +384,7 @@ function createGetAll(tableSchema: string, tableName: string, columns: any[]): s
     text += " * @returns {Promise<" + className + "[]>} - A Promise object returning an array of " + nameBeautifier(tableName) + ".\n";
     text += " */\n";
     text += "export async function getAll" + nameBeautifier(tableName).replaceAll(" ", "") + "(): Promise<" + className + "[]> {\n";
-    text += queryMaker(1, varName, "SELECT * FROM " + tableSchema + "." + tableName, "");
+    text += queryMaker(1, varName, "SELECT * FROM " + tableSchema + "." + tableName + ";", "");
     text += "\n\n";
     text += arrayMaker(1, varName, className, columns) + "\n";
     text += "\treturn " + varName + ";\n";
@@ -431,7 +431,7 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
         query += keys[i] + " = " + "$" + (i + 1) + "::" + columns.find(column => column.column_name == keys[i]).data_type + " AND ";
         parameters += keys[i] + ", ";
     }
-    query = query.slice(0, -5);
+    query = query.slice(0, -5) + ";";
     parameters = parameters.slice(0, -2);
     text += queryMaker(1, varName, query, parameters);
     text += "\n\n";
