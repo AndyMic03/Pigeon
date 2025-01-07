@@ -18,12 +18,12 @@
     "url": "https://github.com/AndyMic03/Pigeon/issues"
   },
   "homepage": "https://github.com/AndyMic03/Pigeon",
-  "main": "dist/index.js",
-  "bin": "dist/index.js",
+  "main": "src/index.js",
+  "bin": "bin/pigeon.js",
   "type": "module",
   "files": [
-    "bin/",
-    "src/"
+    "bin/*.js",
+    "src/*.js"
   ],
   "scripts": {
     "build": "tsc --build",
@@ -34,5 +34,6 @@
     "meow": "^13.2.0",
     "pg": "^8.13.1",
     "prompt-sync": "^4.2.0"
-  }
+  },
+  "gitHead": "be8deef452356329e61d7d6e6caaebbe2beb5498"
 }
