@@ -126,6 +126,55 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
     for (const schema of schemas)
         createDir(path.join(dir, schema));
 
+    const customTypeQuery = await runQuery(
+        `SELECT t.oid, t.typname
+         FROM pg_type t
+         WHERE (t.typrelid = 0 OR t.typrelid IN (SELECT oid FROM pg_class WHERE relkind = 'c'))
+           AND t.typelem = 0
+           AND t.typnamespace NOT IN
+               (SELECT oid FROM pg_namespace WHERE nspname IN ('pg_catalog', 'information_schema'));`,
+        [],
+        host,
+        port,
+        db,
+        user,
+        pass
+    );
+    if (typeof customTypeQuery === "undefined")
+        return {
+            exitCode: 1,
+            message: null,
+            error: new Error("An SQL error has occurred.")
+        }
+    const customTypes = [];
+    for (const type of customTypeQuery.rows) {
+        const enumQuery = await runQuery(
+            `SELECT enumlabel
+             FROM pg_enum
+             WHERE enumtypid = $1::oid
+             ORDER BY enumsortorder;`,
+            [type.oid],
+            host,
+            port,
+            db,
+            user,
+            pass
+        );
+        if (typeof enumQuery === "undefined")
+            return {
+                exitCode: 1,
+                message: null,
+                error: new Error("An SQL error has occurred.")
+            }
+        let labels = [];
+        for (const enumLabel of enumQuery.rows)
+            labels.push(enumLabel.enumlabel);
+        customTypes.push({
+            name: type.typname,
+            labels: labels
+        });
+    }
+
     for (const table of tableQuery.rows) {
         const columnQuery = await runQuery(
             `SELECT *
@@ -207,6 +256,28 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
 
         let ts = clientMaker(0, host, port, db, user, pass);
         ts += "\n\n";
+
+        for (const customType of customTypes) {
+            for (const column of columnQuery.rows) {
+                if (customType.name === column.udt_name) {
+                    const enumName = nameBeautifier(customType.name).replaceAll(" ", "");
+                    ts += "/**\n An Enum representing the " + nameBeautifier(customType.name).toLowerCase() + ".\n * @readonly\n * @enum {string}\n */\n";
+                    ts += "class " + enumName + "{\n";
+
+                    let longestLabel = 0;
+                    for (const label of customType.labels)
+                        if (label.length > longestLabel)
+                            longestLabel = label.length;
+
+                    for (const label of customType.labels)
+                        ts += "\tstatic " + label.toUpperCase().replaceAll(/[^a-zA-Z0-9$]/g, "_") + ": string" + " ".repeat(longestLabel - label.length + 1) + "= \"" + label + "\";\n";
+                    ts += "}\n"
+                }
+            }
+        }
+        if (ts.slice(-2) !== "\n\n")
+            ts += "\n";
+
         ts += createClass(table.table_name, columnQuery.rows, pKeys, fKeyQuery.rows);
         ts += "\n\n";
         ts += createGetAll(table.table_schema, table.table_name, columnQuery.rows);
@@ -232,9 +303,9 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
                 hardDefaults.push(column);
         }
 
-        ts += createAdd(table.table_schema, table.table_name, nonDefaults, [], hardDefaults, fKeyQuery.rows) + "\n\n";
+        ts += createAdd(table.table_schema, table.table_name, nonDefaults, [], hardDefaults.concat(softDefaults), fKeyQuery.rows) + "\n\n";
         for (const softCombination of getCombinations(softDefaults))
-            ts += createAdd(table.table_schema, table.table_name, nonDefaults, softCombination, hardDefaults, fKeyQuery.rows) + "\n\n";
+            ts += createAdd(table.table_schema, table.table_name, nonDefaults, softCombination, hardDefaults.concat(softDefaults.filter(n => !getCombinations(softDefaults).includes(n))), fKeyQuery.rows) + "\n\n";
 
         const regex = /import ({?.*?}?) from "(.*?)";\n/g;
         let match;
@@ -260,6 +331,7 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
         }
         let importString = "";
         for (const object of importObjects) {
+            object.functions = [...new Set(object.functions)];
             importString += "import ";
             if (object.brackets)
                 importString += "{";
@@ -292,6 +364,8 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
     text += "export class " + singularize(nameBeautifier(tableName)).replaceAll(" ", "") + " {\n";
     for (const column of columns) {
         let dataType = types.get(column.data_type);
+        if (dataType === undefined)
+            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
         if (column.is_nullable == "YES")
             dataType += " | undefined";
 
@@ -318,12 +392,12 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
         text += "\t" + column.column_name + ": " + dataType;
         if (column.column_default !== null) {
             if (!column.column_default.includes("nextval")) {
-                if (types.get(column.data_type) === "Date") {
+                if (dataType === "Date") {
                     if (column.column_default)
                         text += " = new Date()";
                     else
                         text += " = new Date(" + column.column_default.replace(' ', 'T') + ")";
-                } else if (types.get(column.data_type) === "number")
+                } else if (dataType === "number")
                     text += " = " + column.column_default;
                 else
                     text += " = \"" + column.column_default + "\"";
@@ -337,8 +411,11 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
     text += "\t * Creates a new object for the " + nameBeautifier(tableName) + " table.\n";
     text += "\t * \n"
     for (const column of columns) {
+        let dataType = types.get(column.data_type);
+        if (dataType === undefined)
+            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
         text += "\t * ";
-        text += "@param {" + types.get(column.data_type);
+        text += "@param {" + dataType;
         if (column.is_nullable == "YES")
             text += " | undefined";
         text += "} " + column.column_name;
@@ -347,7 +424,10 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
     text += "\t */\n";
     text += "\tconstructor(";
     for (const column of columns) {
-        text += column.column_name + ": " + types.get(column.data_type);
+        let dataType = types.get(column.data_type);
+        if (dataType === undefined)
+            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
+        text += column.column_name + ": " + dataType;
         if (column.is_nullable == "YES")
             text += " | undefined";
         text += ", ";
@@ -404,8 +484,11 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
     text += " *\n";
     for (const key of keys) {
         const column = columns.find(column => column.column_name == key);
+        let dataType = types.get(column.data_type);
+        if (dataType === undefined)
+            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
         text += " * ";
-        text += "@param {" + types.get(column.data_type);
+        text += "@param {" + dataType;
         text += "} " + column.column_name;
         text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table.\n";
     }
@@ -456,8 +539,11 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     let columns = nonDefaults.concat(softDefaults);
     columns.sort((a, b) => a.ordinal_position - b.ordinal_position);
     for (const column of columns) {
+        let dataType = types.get(column.data_type);
+        if (dataType === undefined)
+            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
         text += " * ";
-        text += "@param {" + types.get(column.data_type);
+        text += "@param {" + dataType;
         if (column.is_nullable === "YES")
             text += " | undefined";
         text += "} " + column.column_name;
@@ -481,7 +567,10 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     }
     text += "(";
     for (const column of columns) {
-        text += column.column_name + ": " + types.get(column.data_type);
+        let dataType = types.get(column.data_type);
+        if (dataType === undefined)
+            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
+        text += column.column_name + ": " + dataType;
         if (column.is_nullable === "YES")
             text += " | undefined";
         text += ", ";
@@ -500,7 +589,10 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     query += ") VALUES (";
     let parameters = "";
     for (let i = 0; i < columns.length; i++) {
-        query += "$" + (i + 1) + "::" + columns[i].data_type + ", ";
+        let dataType = columns[i].data_type;
+        if (dataType === "USER-DEFINED")
+            dataType = "character varying";
+        query += "$" + (i + 1) + "::" + dataType + ", ";
         parameters += columns[i].column_name + ", ";
     }
     query = query.slice(0, -2);
@@ -510,6 +602,7 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     text += "\n\n";
     text += "\treturn new " + className + "(\n";
     columns = columns.concat(hardDefaults);
+    columns = [...new Set(columns)];
     columns.sort((a, b) => a.ordinal_position - b.ordinal_position);
     for (const column of columns)
         text += "\t\tinsertQuery.rows[0]." + column.column_name + ",\n";
