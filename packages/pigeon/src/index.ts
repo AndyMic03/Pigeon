@@ -262,7 +262,7 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
                 if (customType.name === column.udt_name) {
                     const enumName = nameBeautifier(customType.name).replaceAll(" ", "");
                     ts += "/**\n An Enum representing the " + nameBeautifier(customType.name).toLowerCase() + ".\n * @readonly\n * @enum {string}\n */\n";
-                    ts += "class " + enumName + "{\n";
+                    ts += "class " + enumName + " {\n";
 
                     let longestLabel = 0;
                     for (const label of customType.labels)
@@ -271,12 +271,10 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
 
                     for (const label of customType.labels)
                         ts += "\tstatic " + label.toUpperCase().replaceAll(/[^a-zA-Z0-9$]/g, "_") + ": string" + " ".repeat(longestLabel - label.length + 1) + "= \"" + label + "\";\n";
-                    ts += "}\n"
+                    ts += "}\n\n"
                 }
             }
         }
-        if (ts.slice(-2) !== "\n\n")
-            ts += "\n";
 
         ts += createClass(table.table_name, columnQuery.rows, pKeys, fKeyQuery.rows);
         ts += "\n\n";
@@ -450,7 +448,7 @@ export function clientMaker(baseTabs: number, host: string, port: number, db: st
     text += tabsInserter(baseTabs + 1) + "database: \"" + db + "\",\n";
     text += tabsInserter(baseTabs + 1) + "user: \"" + user + "\",\n";
     text += tabsInserter(baseTabs + 1) + "password: \"" + pass + "\"\n";
-    text += tabsInserter(baseTabs) + "});\n";
+    text += tabsInserter(baseTabs) + "});";
     return text;
 }
 
@@ -500,7 +498,7 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
     text = text.slice(0, -3);
     text += "(";
     for (const key of keys)
-        text += key + ": " + types.get(columns.find(column => column.column_name == key).data_type) + ", ";
+        text += key + ": " + (types.get(columns.find(column => column.column_name == key).data_type) || nameBeautifier(columns.find(column => column.column_name == key).udt_name).replaceAll(" ", "")) + ", ";
     text = text.slice(0, -2);
     text += "): Promise<" + className + "[]> {\n";
     text += "\tif (";
@@ -511,7 +509,7 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
     let query = "SELECT * FROM " + tableSchema + "." + tableName + " WHERE ";
     let parameters = "";
     for (let i = 0; i < keys.length; i++) {
-        query += keys[i] + " = " + "$" + (i + 1) + "::" + columns.find(column => column.column_name == keys[i]).data_type + " AND ";
+        query += keys[i] + " = " + "$" + (i + 1) + "::" + (columns.find(column => column.column_name == keys[i]).data_type || columns.find(column => column.column_name == keys[i]).udt_name) + " AND ";
         parameters += keys[i] + ", ";
     }
     query = query.slice(0, -5) + ";";
@@ -591,7 +589,7 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     for (let i = 0; i < columns.length; i++) {
         let dataType = columns[i].data_type;
         if (dataType === "USER-DEFINED")
-            dataType = "character varying";
+            dataType = columns[i].udt_name;
         query += "$" + (i + 1) + "::" + dataType + ", ";
         parameters += columns[i].column_name + ", ";
     }
