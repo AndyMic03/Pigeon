@@ -254,6 +254,32 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
                 error: new Error("An SQL error has occurred.")
             }
 
+        const uniqueQuery = await runQuery(
+            `SELECT array_agg(a.attname) AS columns
+             FROM pg_constraint AS c
+                      CROSS JOIN LATERAL unnest(c.conkey) AS k(c)
+                      JOIN pg_attribute AS a ON a.attnum = k.c AND a.attrelid = c.conrelid
+             WHERE c.contype = 'u'
+               AND c.connamespace = $1::regnamespace
+               AND c.conrelid = $2::regclass
+             GROUP BY c.conrelid;
+            `,
+            [table.table_schema, table.table_name],
+            host,
+            port,
+            db,
+            user,
+            pass);
+        if (typeof uniqueQuery === "undefined")
+            return {
+                exitCode: 1,
+                message: null,
+                error: new Error("An SQL error has occurred.")
+            }
+        let uniques: string[] = [];
+        if (uniqueQuery.rowCount > 0)
+            uniques = uniqueQuery.rows[0].columns.slice(1, -1).split(",");
+
         let ts = clientMaker(0, host, port, db, user, pass);
         ts += "\n\n";
 
@@ -282,8 +308,10 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
         ts += "\n\n";
 
         let keys = [...pKeys];
-        for (let fKey of fKeyQuery.rows)
+        for (const fKey of fKeyQuery.rows)
             keys.push(fKey.local_column.replaceAll(" ", ""));
+        keys = keys.concat(uniques);
+        keys = [...new Set(keys)];
         for (const keyCombination of getCombinations(keys)) {
             ts += createGet(table.table_schema, table.table_name, columnQuery.rows, keyCombination);
             ts += "\n\n";
@@ -304,16 +332,19 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
         ts += createAdd(table.table_schema, table.table_name, nonDefaults, [], hardDefaults.concat(softDefaults), fKeyQuery.rows) + "\n\n";
         for (const softCombination of getCombinations(softDefaults))
             ts += createAdd(table.table_schema, table.table_name, nonDefaults, softCombination, hardDefaults.concat(softDefaults.filter(n => !getCombinations(softDefaults).includes(n))), fKeyQuery.rows) + "\n\n";
+        ts = ts.slice(0, -2);
 
         const regex = /import ({?.*?}?) from "(.*?)";\n/g;
-        let match;
         let importObjects = [];
 
-        while ((match = regex.exec(ts)) !== null) {
-            ts = ts.replace(match[0], "");
+        const matches = ts.matchAll(regex);
+        let charOffset = 0;
+        for (const match of matches) {
+            ts = ts.slice(0, match.index - charOffset) + ts.slice(match.index - charOffset + match[0].length);
+            charOffset += match[0].length;
             let fileExists = false;
+            const isBrackets = match[1][0] === "{";
             for (const object of importObjects) {
-                const isBrackets = match[1][0] === "{";
                 if (object.file === match[2] && isBrackets === object.brackets) {
                     fileExists = true;
                     object.functions.push(match[1]);
@@ -323,7 +354,7 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
                 importObjects.push({
                     file: match[2],
                     functions: [match[1]],
-                    brackets: match[1][0] === "{"
+                    brackets: isBrackets
                 });
             }
         }
@@ -526,7 +557,9 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     let text = "";
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
     for (const foreignKey of foreignKeys) {
-        text += "import {get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "} from \"."
+        if ((tableSchema == foreignKey.referenced_schema) && (tableName == foreignKey.referenced_table))
+            continue;
+        text += "import {get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "} from \".";
         if (tableSchema !== foreignKey.referenced_schema)
             text += "./" + foreignKey.referenced_schema;
         text += "/" + foreignKey.referenced_table + ".js\";\n";
@@ -576,9 +609,17 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     text = text.slice(0, -2);
     text += "): Promise<" + className + "> {\n";
     for (const foreignKey of foreignKeys) {
-        text += "\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
-        text += "\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
-        text += "\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n\n"
+        if (columns.find(column => column.column_name == foreignKey.local_column).is_nullable === "YES") {
+            text += "\tif (" + foreignKey.local_column + ") {\n";
+            text += "\t\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
+            text += "\t\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
+            text += "\t\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n";
+            text += "\t}\n\n"
+        } else {
+            text += "\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
+            text += "\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
+            text += "\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n\n";
+        }
     }
     let query = "INSERT INTO " + tableSchema + "." + tableName + " (";
     for (const column of columns)
