@@ -1,12 +1,13 @@
 /*
- * Copyright (c) 2024 Andreas Michael
+ * Copyright (c) 2025 Andreas Michael
  * This software is under the Apache 2.0 License
  */
 
 import meow from "meow";
 import {createConfig} from "./config.js";
+import {Database, deleteDir, guided, PigeonError, queryDB, runGeneration} from "./index.js";
+
 import * as path from "node:path";
-import {deleteDir, guided, runPigeon} from "./index.js";
 import fs from "node:fs";
 
 export const cli = meow(
@@ -68,21 +69,27 @@ export const cli = meow(
     }
 );
 
-export async function run(flags: any): Promise<{ exitCode: number, message: string | null, error: Error | null }> {
+export async function run(flags: any): Promise<void | PigeonError> {
     if (flags.init)
         return createConfig(flags.cwd);
     if (flags.force)
         deleteDir(flags.output);
     if (flags.guided) {
         const params = guided();
-        return await runPigeon(flags.output, params.host, params.port, params.db, params.user, params.pass);
+        const database = new Database(params.host, String(params.port), params.db, params.user, params.pass);
+        const result = await queryDB(database);
+        if (result instanceof PigeonError)
+            return result;
     }
     if (!fs.existsSync(path.join(process.cwd(), ".pigeon.json")))
-        return {
-            exitCode: 1,
-            message: null,
-            error: new Error("The configuration file does not exist. Generate one using the \"pigeon --init\" command"),
-        }
+        return new PigeonError(1, "", new Error("The configuration file does not exist. Generate one using the \"pigeon --init\" command"));
+
     const params = JSON.parse(fs.readFileSync(flags.config).toString());
-    return await runPigeon(flags.output, params.host, params.port, params.database, params.username, params.password);
+    const database = new Database(params.host, params.port, params.database, params.username, params.password);
+    const queryResult = await queryDB(database);
+    if (queryResult instanceof PigeonError)
+        return queryResult;
+    const generationResult = runGeneration(flags.output, database, queryResult.tables, queryResult.enums);
+    if (generationResult instanceof PigeonError)
+        return generationResult;
 }

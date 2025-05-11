@@ -1,43 +1,141 @@
 /*
- * Copyright (c) 2024 Andreas Michael
+ * Copyright (c) 2025 Andreas Michael
  * This software is under the Apache 2.0 License
  */
 
 import {
     arrayMaker,
+    consoleMessage,
     getCombinations,
+    getType,
     nameBeautifier,
     queryMaker,
     runQuery,
     singularize,
     sleep,
     tabsInserter
-} from "./utils.js"
-import {types} from "./maps.js"
-import fs from "node:fs";
-import * as path from "node:path";
+} from "./utils.js";
+
 import prompt from "prompt-sync";
 
-function createDir(dirPath: string) {
-    if (fs.existsSync(dirPath))
-        return {
-            exitCode: 1,
-            message: null,
-            error: new Error("Generation directory already exists. Add the --force flag if you want to overwrite it.")
-        }
-    else
-        fs.mkdir(dirPath, (err) => {
-            if (err) return {
-                exitCode: 1,
-                message: null,
-                error: err
-            }
-        });
-    return {
-        exitCode: 0,
-        message: null,
-        error: null
+import fs from "node:fs";
+import * as path from "node:path";
+
+export class PigeonError {
+    exitCode: number;
+    message: string;
+    error: Error | null;
+
+    constructor(exitCode: number, message: string, error: Error | null) {
+        this.exitCode = exitCode;
+        this.message = message;
+        this.error = error;
     }
+}
+
+export class Database {
+    host: string;
+    port: string;
+    db: string;
+    user: string;
+    pass: string;
+
+    constructor(host: string, port: string, db: string, user: string, pass: string) {
+        this.host = host;
+        this.port = port;
+        this.db = db;
+        this.user = user;
+        this.pass = pass;
+    }
+}
+
+class Table {
+    table_schema: string;
+    table_name: string;
+    columns: ColumnQueryRow[] = [];
+    primaryKey: PrimaryKeyQueryRow | undefined;
+    foreignKeys: ForeignKeyQueryRow[] | undefined;
+    unique: UniqueQueryRow | undefined;
+
+    constructor(table_schema: string, table_name: string, columns: ColumnQueryRow[], primaryKey: PrimaryKeyQueryRow | undefined, foreignKeys: ForeignKeyQueryRow[] | undefined, unique: UniqueQueryRow | undefined) {
+        this.table_schema = table_schema;
+        this.table_name = table_name;
+        this.columns = columns;
+        this.primaryKey = primaryKey;
+        this.foreignKeys = foreignKeys;
+        this.unique = unique;
+    }
+}
+
+class Enum {
+    name: string;
+    labels: string[];
+
+    constructor(name: string, labels: string[]) {
+        this.name = name;
+        this.labels = labels;
+    }
+}
+
+class ColumnQueryRow {
+    column_name: string;
+    ordinal_position: number;
+    column_default: string;
+    is_nullable: string;
+    data_type: string;
+    udt_name: string;
+    is_identity: string;
+    identity_generation: string;
+
+    constructor(column_name: string, ordinal_position: number, column_default: string, is_nullable: string, data_type: string, udt_name: string, is_identity: string, identity_generation: string) {
+        this.column_name = column_name;
+        this.ordinal_position = ordinal_position;
+        this.column_default = column_default;
+        this.is_nullable = is_nullable;
+        this.data_type = data_type;
+        this.udt_name = udt_name;
+        this.is_identity = is_identity;
+        this.identity_generation = identity_generation;
+    }
+}
+
+class PrimaryKeyQueryRow {
+    column_name: string;
+
+    constructor(column_name: string) {
+        this.column_name = column_name;
+    }
+}
+
+class ForeignKeyQueryRow {
+    local_table: string;
+    local_column: string;
+    foreign_schema: string;
+    foreign_table: string;
+    foreign_column: string;
+
+    constructor(local_table: string, local_column: string, foreign_schema: string, foreign_table: string, foreign_column: string) {
+        this.local_table = local_table;
+        this.local_column = local_column;
+        this.foreign_schema = foreign_schema;
+        this.foreign_table = foreign_table;
+        this.foreign_column = foreign_column;
+    }
+}
+
+class UniqueQueryRow {
+    columns: string[];
+
+    constructor(columns: string[]) {
+        this.columns = columns;
+    }
+}
+
+function createDir(dirPath: string): void | PigeonError {
+    if (fs.existsSync(dirPath))
+        return new PigeonError(1, "", new Error("Generation directory already exists. Add the --force flag if you want to overwrite it."));
+    else
+        fs.mkdirSync(dirPath);
 }
 
 export function deleteDir(dirPath: string) {
@@ -89,14 +187,7 @@ export function guided() {
     return {host, port, db, user, pass};
 }
 
-export async function runPigeon(dir: string, host: string, port: number, db: string, user: string, pass: string): Promise<{
-    exitCode: number,
-    message: string | null,
-    error: Error | null
-}> {
-    const dirResult = createDir(dir);
-    if (dirResult.exitCode !== 0)
-        return dirResult;
+export async function queryDB(db: Database): Promise<{ tables: Table[], enums: Enum[] } | PigeonError> {
     const tableQuery = await runQuery(
         `SELECT table_schema, table_name
          FROM information_schema.tables
@@ -104,27 +195,10 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
            AND table_schema NOT IN
                ('pg_catalog', 'information_schema');`,
         [],
-        host,
-        port,
-        db,
-        user,
-        pass
+        db
     );
     if (typeof tableQuery === "undefined")
-        return {
-            exitCode: 1,
-            message: null,
-            error: new Error("An SQL error has occurred.")
-        }
-
-    let schemas: string[] = [];
-    for (const table of tableQuery.rows) {
-        if (schemas.includes(table.table_schema))
-            continue;
-        schemas.push(table.table_schema);
-    }
-    for (const schema of schemas)
-        createDir(path.join(dir, schema));
+        return new PigeonError(1, "", new Error("An SQL error has occurred."))
 
     const customTypeQuery = await runQuery(
         `SELECT t.oid, t.typname
@@ -134,19 +208,12 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
            AND t.typnamespace NOT IN
                (SELECT oid FROM pg_namespace WHERE nspname IN ('pg_catalog', 'information_schema'));`,
         [],
-        host,
-        port,
-        db,
-        user,
-        pass
+        db
     );
     if (typeof customTypeQuery === "undefined")
-        return {
-            exitCode: 1,
-            message: null,
-            error: new Error("An SQL error has occurred.")
-        }
-    const customTypes = [];
+        return new PigeonError(1, "", new Error("An SQL error has occurred."))
+
+    const enums = [];
     for (const type of customTypeQuery.rows) {
         const enumQuery = await runQuery(
             `SELECT enumlabel
@@ -154,46 +221,36 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
              WHERE enumtypid = $1::oid
              ORDER BY enumsortorder;`,
             [type.oid],
-            host,
-            port,
-            db,
-            user,
-            pass
+            db
         );
         if (typeof enumQuery === "undefined")
-            return {
-                exitCode: 1,
-                message: null,
-                error: new Error("An SQL error has occurred.")
-            }
+            return new PigeonError(1, "", new Error("An SQL error has occurred."))
+
         let labels = [];
         for (const enumLabel of enumQuery.rows)
             labels.push(enumLabel.enumlabel);
-        customTypes.push({
-            name: type.typname,
-            labels: labels
-        });
+        enums.push(new Enum(type.typname, labels));
     }
 
+    const tables: Table[] = [];
     for (const table of tableQuery.rows) {
         const columnQuery = await runQuery(
-            `SELECT *
+            `SELECT column_name,
+                    ordinal_position,
+                    column_default,
+                    is_nullable,
+                    data_type,
+                    udt_name,
+                    is_identity,
+                    identity_generation
              FROM information_schema.columns
              WHERE table_name = $1::varchar
                AND table_schema = $2::varchar;`,
             [table.table_name, table.table_schema],
-            host,
-            port,
-            db,
-            user,
-            pass
+            db
         );
         if (typeof columnQuery === "undefined")
-            return {
-                exitCode: 1,
-                message: null,
-                error: new Error("An SQL error has occurred.")
-            }
+            return new PigeonError(1, "", new Error("An SQL error has occurred."))
 
         const pKeyQuery = await runQuery(
             `SELECT ku.column_name
@@ -204,29 +261,18 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
              WHERE tc.table_schema = $1::varchar
                AND tc.table_name = $2::varchar;`,
             [table.table_schema, table.table_name],
-            host,
-            port,
-            db,
-            user,
-            pass
+            db
         );
         if (typeof pKeyQuery === "undefined")
-            return {
-                exitCode: 1,
-                message: null,
-                error: new Error("An SQL error has occurred.")
-            }
-        let pKeys: string[] = [];
-        for (let pKey of pKeyQuery.rows)
-            pKeys.push(pKey.column_name);
+            return new PigeonError(1, "", new Error("An SQL error has occurred."))
 
         const fKeyQuery = await runQuery(
             `SELECT kcu1.table_schema AS local_schema,
                     kcu1.table_name   AS local_table,
                     kcu1.column_name  AS local_column,
-                    kcu2.table_schema AS referenced_schema,
-                    kcu2.table_name   AS referenced_table,
-                    kcu2.column_name  AS referenced_column
+                    kcu2.table_schema AS foreign_schema,
+                    kcu2.table_name   AS foreign_table,
+                    kcu2.column_name  AS foreign_column
              FROM information_schema.referential_constraints AS rc
                       INNER JOIN information_schema.key_column_usage AS kcu1
                                  ON kcu1.constraint_catalog = rc.constraint_catalog
@@ -241,18 +287,10 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
              WHERE kcu1.table_schema = $1::varchar
                AND kcu1.table_name = $2::varchar;`,
             [table.table_schema, table.table_name],
-            host,
-            port,
-            db,
-            user,
-            pass
+            db
         );
         if (typeof fKeyQuery === "undefined")
-            return {
-                exitCode: 1,
-                message: null,
-                error: new Error("An SQL error has occurred.")
-            }
+            return new PigeonError(1, "", new Error("An SQL error has occurred."))
 
         const uniqueQuery = await runQuery(
             `SELECT array_agg(a.attname) AS columns
@@ -265,73 +303,99 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
              GROUP BY c.conrelid;
             `,
             [table.table_schema, table.table_name],
-            host,
-            port,
-            db,
-            user,
-            pass);
+            db);
         if (typeof uniqueQuery === "undefined")
-            return {
-                exitCode: 1,
-                message: null,
-                error: new Error("An SQL error has occurred.")
-            }
+            return new PigeonError(1, "", new Error("An SQL error has occurred."))
+
         let uniques: string[] = [];
         if (uniqueQuery.rowCount > 0)
             uniques = uniqueQuery.rows[0].columns.slice(1, -1).split(",");
+        tables.push(new Table(table.table_schema, table.table_name, columnQuery.rows, pKeyQuery.rows[0], fKeyQuery.rows, {columns: uniques}));
+    }
+    return {
+        tables: tables,
+        enums: enums
+    }
+}
 
-        let ts = clientMaker(0, host, port, db, user, pass);
+
+export function runGeneration(dir: string, db: Database, tables: Table[] | undefined, enums: Enum[] | undefined): void | PigeonError {
+    if (!tables)
+        return new PigeonError(1, "", new Error("No tables were found."));
+    const dirResult = createDir(dir);
+    if (dirResult instanceof PigeonError)
+        return dirResult;
+    let schemas: string[] = [];
+    for (const table of tables) {
+        if (schemas.includes(table.table_schema))
+            continue;
+        schemas.push(table.table_schema);
+    }
+    for (const schema of schemas) {
+        const dirResult = createDir(path.join(dir, schema));
+        if (dirResult instanceof PigeonError)
+            return dirResult;
+    }
+
+    for (const table of tables) {
+        let ts = clientMaker(0, db);
         ts += "\n\n";
 
-        for (const customType of customTypes) {
-            for (const column of columnQuery.rows) {
-                if (customType.name === column.udt_name) {
-                    const enumName = nameBeautifier(customType.name).replaceAll(" ", "");
-                    ts += "/**\n An Enum representing the " + nameBeautifier(customType.name).toLowerCase() + ".\n * @readonly\n * @enum {string}\n */\n";
-                    ts += "class " + enumName + " {\n";
+        if (enums) {
+            for (const cEnum of enums) {
+                for (const column of table.columns) {
+                    if (cEnum.name === column.udt_name) {
+                        const enumName = nameBeautifier(cEnum.name).replaceAll(" ", "");
+                        ts += "/**\n An Enum representing the " + nameBeautifier(cEnum.name).toLowerCase() + ".\n * @readonly\n * @enum {string}\n */\n";
+                        ts += "class " + enumName + " {\n";
 
-                    let longestLabel = 0;
-                    for (const label of customType.labels)
-                        if (label.length > longestLabel)
-                            longestLabel = label.length;
+                        let longestLabel = 0;
+                        for (const label of cEnum.labels)
+                            if (label.length > longestLabel)
+                                longestLabel = label.length;
 
-                    for (const label of customType.labels)
-                        ts += "\tstatic " + label.toUpperCase().replaceAll(/[^a-zA-Z0-9$]/g, "_") + ": string" + " ".repeat(longestLabel - label.length + 1) + "= \"" + label + "\";\n";
-                    ts += "}\n\n"
+                        for (const label of cEnum.labels)
+                            ts += "\tstatic " + label.toUpperCase().replaceAll(/[^a-zA-Z0-9$]/g, "_") + ": string" + " ".repeat(longestLabel - label.length + 1) + "= \"" + label + "\";\n";
+                        ts += "}\n\n"
+                    }
                 }
             }
         }
 
-        ts += createClass(table.table_name, columnQuery.rows, pKeys, fKeyQuery.rows);
+        ts += createClass(table.table_name, table.columns, table.primaryKey?.column_name, table.foreignKeys);
         ts += "\n\n";
-        ts += createGetAll(table.table_schema, table.table_name, columnQuery.rows);
+        ts += createGetAll(table.table_schema, table.table_name, table.columns);
         ts += "\n\n";
 
-        let keys = [...pKeys];
-        for (const fKey of fKeyQuery.rows)
-            keys.push(fKey.local_column.replaceAll(" ", ""));
-        keys = keys.concat(uniques);
+        let keys = [];
+        if (table.primaryKey)
+            keys.push(table.primaryKey.column_name);
+        if (table.foreignKeys)
+            for (const fKey of table.foreignKeys)
+                keys.push(fKey.local_column.replaceAll(" ", ""));
+        if (table.unique)
+            keys = keys.concat(table.unique.columns);
         keys = [...new Set(keys)];
         for (const keyCombination of getCombinations(keys)) {
-            ts += createGet(table.table_schema, table.table_name, columnQuery.rows, keyCombination);
+            ts += createGet(table.table_schema, table.table_name, table.columns, keyCombination);
             ts += "\n\n";
         }
 
         let nonDefaults = [];
         let softDefaults = [];
         let hardDefaults = [];
-        for (const column of columnQuery.rows) {
+        for (const column of table.columns) {
             if (column.column_default === null && column.is_identity === "NO")
                 nonDefaults.push(column);
-            if ((column.column_default !== null && !column.column_default.includes("nextval")) || (column.is_identity === "YES" && column.identity_generation === "BY DEFAULT"))
+            else if ((column.column_default !== null && !column.column_default.includes("nextval")) || (column.is_identity === "YES" && column.identity_generation === "BY DEFAULT"))
                 softDefaults.push(column);
-            if ((column.column_default !== null && column.column_default.includes("nextval")) || (column.is_identity === "YES" && column.identity_generation === "ALWAYS"))
+            else if ((column.column_default !== null && column.column_default.includes("nextval")) || (column.is_identity === "YES" && column.identity_generation === "ALWAYS"))
                 hardDefaults.push(column);
         }
 
-        ts += createAdd(table.table_schema, table.table_name, nonDefaults, [], hardDefaults.concat(softDefaults), fKeyQuery.rows) + "\n\n";
+        ts += createAdd(table.table_schema, table.table_name, nonDefaults, [], hardDefaults.concat(softDefaults), table.foreignKeys) + "\n\n";
         for (const softCombination of getCombinations(softDefaults))
-            ts += createAdd(table.table_schema, table.table_name, nonDefaults, softCombination, hardDefaults.concat(softDefaults.filter(n => !getCombinations(softDefaults).includes(n))), fKeyQuery.rows) + "\n\n";
+            ts += createAdd(table.table_schema, table.table_name, nonDefaults, softCombination, hardDefaults.concat(softDefaults.filter(n => !getCombinations(softDefaults).includes([n]))), table.foreignKeys) + "\n\n";
         ts = ts.slice(0, -2);
 
         const regex = /import ({?.*?}?) from "(.*?)";\n/g;
@@ -381,37 +445,33 @@ export async function runPigeon(dir: string, host: string, port: number, db: str
 
         fs.writeFileSync(path.join(dir, table.table_schema, table.table_name + ".ts"), ts);
     }
-    return {
-        exitCode: 0,
-        message: "Generation Completed Successfully",
-        error: null
-    }
 }
 
-function createClass(tableName: string, columns: any[], primaryKeys: string[], foreignKeys: any[]): string {
+function createClass(tableName: string, columns: ColumnQueryRow[], primaryKey?: string, foreignKeys?: ForeignKeyQueryRow[]): string {
     let text = "";
     text += "export class " + singularize(nameBeautifier(tableName)).replaceAll(" ", "") + " {\n";
     for (const column of columns) {
-        let dataType = types.get(column.data_type);
-        if (dataType === undefined)
-            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
-        if (column.is_nullable == "YES")
+        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
+        if (column.is_nullable === "YES")
             dataType += " | undefined";
 
         let isPrimaryKey = false;
-        for (const pKey of primaryKeys)
-            if (pKey === column.column_name)
-                isPrimaryKey = true;
-        let foreignKeyIndex = -1;
-        for (let i = 0; i < foreignKeys.length; i++)
-            if (foreignKeys[i].local_column === column.column_name)
-                foreignKeyIndex = i;
+        if (column.column_name === primaryKey)
+            isPrimaryKey = true;
+
+        let foreignKeyIndex;
+        if (foreignKeys)
+            for (let i = 0; i < foreignKeys.length; i++)
+                if (foreignKeys[i].local_column === column.column_name)
+                    foreignKeyIndex = i;
 
         text += "\t/**\n";
         if (isPrimaryKey)
             text += "\t * A primary key representing the " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table.\n";
-        else if (foreignKeyIndex !== -1)
-            text += "\t * A foreign key representing the " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table and referencing the " + nameBeautifier(foreignKeys[foreignKeyIndex].referenced_column) + " in the " + nameBeautifier(foreignKeys[foreignKeyIndex].referenced_table) + " table in the " + nameBeautifier(foreignKeys[foreignKeyIndex].referenced_schema) + " schema.\n";
+        else if (foreignKeys && foreignKeyIndex)
+            text += "\t * A foreign key representing the " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table and referencing the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_column) + " in the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_table) + " table in the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_schema) + " schema.\n";
+        else if (column.column_name.toLowerCase().startsWith('is_'))
+            text += "\t * Indicates whether this record in the table " + nameBeautifier(tableName) + " is currently " + nameBeautifier(column.column_name.slice(3)).toLowerCase() + ".\n";
         else
             text += "\t * The " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table.\n";
 
@@ -426,7 +486,7 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
                         text += " = new Date()";
                     else
                         text += " = new Date(" + column.column_default.replace(' ', 'T') + ")";
-                } else if (dataType === "number")
+                } else if (dataType === "number" || dataType === "boolean")
                     text += " = " + column.column_default;
                 else
                     text += " = \"" + column.column_default + "\"";
@@ -440,24 +500,23 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
     text += "\t * Creates a new object for the " + nameBeautifier(tableName) + " table.\n";
     text += "\t * \n"
     for (const column of columns) {
-        let dataType = types.get(column.data_type);
-        if (dataType === undefined)
-            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
+        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
         text += "\t * ";
         text += "@param {" + dataType;
-        if (column.is_nullable == "YES")
+        if (column.is_nullable === "YES")
             text += " | undefined";
         text += "} " + column.column_name;
-        text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table. \n";
+        if (!column.column_name.toLowerCase().startsWith('is_'))
+            text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table. \n";
+        else
+            text += " - Indicates whether this record in the table " + nameBeautifier(tableName) + " is currently " + nameBeautifier(column.column_name.slice(3)).toLowerCase() + ".\n";
     }
     text += "\t */\n";
     text += "\tconstructor(";
     for (const column of columns) {
-        let dataType = types.get(column.data_type);
-        if (dataType === undefined)
-            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
+        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
         text += column.column_name + ": " + dataType;
-        if (column.is_nullable == "YES")
+        if (column.is_nullable === "YES")
             text += " | undefined";
         text += ", ";
     }
@@ -471,19 +530,19 @@ function createClass(tableName: string, columns: any[], primaryKeys: string[], f
     return text;
 }
 
-export function clientMaker(baseTabs: number, host: string, port: number, db: string, user: string, pass: string): string {
+export function clientMaker(baseTabs: number, db: Database): string {
     let text: string = "";
     text += tabsInserter(baseTabs) + "const client = new Client({\n";
-    text += tabsInserter(baseTabs + 1) + "host: \"" + host + "\",\n";
-    text += tabsInserter(baseTabs + 1) + "port: " + port + ",\n";
-    text += tabsInserter(baseTabs + 1) + "database: \"" + db + "\",\n";
-    text += tabsInserter(baseTabs + 1) + "user: \"" + user + "\",\n";
-    text += tabsInserter(baseTabs + 1) + "password: \"" + pass + "\"\n";
+    text += tabsInserter(baseTabs + 1) + "host: \"" + db.host + "\",\n";
+    text += tabsInserter(baseTabs + 1) + "port: " + db.port + ",\n";
+    text += tabsInserter(baseTabs + 1) + "database: \"" + db.db + "\",\n";
+    text += tabsInserter(baseTabs + 1) + "user: \"" + db.user + "\",\n";
+    text += tabsInserter(baseTabs + 1) + "password: \"" + db.pass + "\"\n";
     text += tabsInserter(baseTabs) + "});";
     return text;
 }
 
-function createGetAll(tableSchema: string, tableName: string, columns: any[]): string {
+function createGetAll(tableSchema: string, tableName: string, columns: ColumnQueryRow[]): string {
     let text = "";
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
     const varName = nameBeautifier(tableName).replaceAll(" ", "")[0].toLowerCase() + nameBeautifier(tableName).replaceAll(" ", "").substring(1);
@@ -501,7 +560,7 @@ function createGetAll(tableSchema: string, tableName: string, columns: any[]): s
     return text;
 }
 
-function createGet(tableSchema: string, tableName: string, columns: any[], keys: string[]): string {
+function createGet(tableSchema: string, tableName: string, columns: ColumnQueryRow[], keys: string[]): string {
     let text = "";
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
     const varName = nameBeautifier(tableName).replaceAll(" ", "")[0].toLowerCase() + nameBeautifier(tableName).replaceAll(" ", "").substring(1);
@@ -512,10 +571,12 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
     text = text.slice(0, -5) + ".\n";
     text += " *\n";
     for (const key of keys) {
-        const column = columns.find(column => column.column_name == key);
-        let dataType = types.get(column.data_type);
-        if (dataType === undefined)
-            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
+        const column = columns.find(column => column.column_name === key);
+        if (!column) {
+            consoleMessage("WRN", `Key ${key} was not found in the columns of table ${tableName}.`);
+            continue;
+        }
+        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
         text += " * ";
         text += "@param {" + dataType;
         text += "} " + column.column_name;
@@ -528,8 +589,14 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
         text += nameBeautifier(key).replaceAll(" ", "") + "And";
     text = text.slice(0, -3);
     text += "(";
-    for (const key of keys)
-        text += key + ": " + (types.get(columns.find(column => column.column_name == key).data_type) || nameBeautifier(columns.find(column => column.column_name == key).udt_name).replaceAll(" ", "")) + ", ";
+    for (const key of keys) {
+        const column = columns.find(column => column.column_name === key);
+        if (!column) {
+            consoleMessage("WRN", `Key ${key} was not found in the columns of table ${tableName}.`);
+            continue;
+        }
+        text += key + ": " + getType(column.data_type, column.udt_name) + ", ";
+    }
     text = text.slice(0, -2);
     text += "): Promise<" + className + "[]> {\n";
     text += "\tif (";
@@ -540,7 +607,12 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
     let query = "SELECT * FROM " + tableSchema + "." + tableName + " WHERE ";
     let parameters = "";
     for (let i = 0; i < keys.length; i++) {
-        query += keys[i] + " = " + "$" + (i + 1) + "::" + (columns.find(column => column.column_name == keys[i]).data_type || columns.find(column => column.column_name == keys[i]).udt_name) + " AND ";
+        const column = columns.find(column => column.column_name === keys[i]);
+        if (!column) {
+            consoleMessage("WRN", `Key ${keys[i]} was not found in the columns of table ${tableName}.`);
+            continue;
+        }
+        query += keys[i] + " = " + "$" + (i + 1) + "::" + (column.data_type || column.udt_name) + " AND ";
         parameters += keys[i] + ", ";
     }
     query = query.slice(0, -5) + ";";
@@ -553,16 +625,18 @@ function createGet(tableSchema: string, tableName: string, columns: any[], keys:
     return text;
 }
 
-function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], softDefaults: any[], hardDefaults: any[], foreignKeys: any[]): string {
+function createAdd(tableSchema: string, tableName: string, nonDefaults: ColumnQueryRow[], softDefaults: ColumnQueryRow[], hardDefaults: ColumnQueryRow[], foreignKeys?: ForeignKeyQueryRow[]): string {
     let text = "";
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
-    for (const foreignKey of foreignKeys) {
-        if ((tableSchema == foreignKey.referenced_schema) && (tableName == foreignKey.referenced_table))
-            continue;
-        text += "import {get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "} from \".";
-        if (tableSchema !== foreignKey.referenced_schema)
-            text += "./" + foreignKey.referenced_schema;
-        text += "/" + foreignKey.referenced_table + ".js\";\n";
+    if (foreignKeys) {
+        for (const foreignKey of foreignKeys) {
+            if ((tableSchema === foreignKey.foreign_schema) && (tableName === foreignKey.foreign_table))
+                continue;
+            text += "import {get" + nameBeautifier(foreignKey.foreign_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.foreign_column).replaceAll(" ", "") + "} from \".";
+            if (tableSchema !== foreignKey.foreign_schema)
+                text += "./" + foreignKey.foreign_schema;
+            text += "/" + foreignKey.foreign_table + ".js\";\n";
+        }
     }
     text += "/**\n";
     text += " * Adds the provided " + className + " object to the database.\n";
@@ -570,9 +644,7 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     let columns = nonDefaults.concat(softDefaults);
     columns.sort((a, b) => a.ordinal_position - b.ordinal_position);
     for (const column of columns) {
-        let dataType = types.get(column.data_type);
-        if (dataType === undefined)
-            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
+        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
         text += " * ";
         text += "@param {" + dataType;
         if (column.is_nullable === "YES")
@@ -581,7 +653,7 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
         text += " - The " + nameBeautifier(column.column_name) + " to be inserted into the " + nameBeautifier(tableName) + " table.\n";
     }
     text += " * @returns {Promise<" + className + ">} - A Promise object returning the inserted " + nameBeautifier(tableName) + ".\n";
-    if (foreignKeys.length > 0) {
+    if (foreignKeys && foreignKeys.length > 0) {
         text += " * @throws string An exception in the case of the "
         for (const foreignKey of foreignKeys)
             text += nameBeautifier(foreignKey.local_column) + " or the "
@@ -598,9 +670,7 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     }
     text += "(";
     for (const column of columns) {
-        let dataType = types.get(column.data_type);
-        if (dataType === undefined)
-            dataType = nameBeautifier(column.udt_name).replaceAll(" ", "");
+        let dataType = getType(column.data_type, column.udt_name);
         text += column.column_name + ": " + dataType;
         if (column.is_nullable === "YES")
             text += " | undefined";
@@ -608,17 +678,24 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     }
     text = text.slice(0, -2);
     text += "): Promise<" + className + "> {\n";
-    for (const foreignKey of foreignKeys) {
-        if (columns.find(column => column.column_name == foreignKey.local_column).is_nullable === "YES") {
-            text += "\tif (" + foreignKey.local_column + ") {\n";
-            text += "\t\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
-            text += "\t\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
-            text += "\t\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n";
-            text += "\t}\n\n"
-        } else {
-            text += "\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.referenced_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.referenced_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
-            text += "\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
-            text += "\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n\n";
+    if (foreignKeys) {
+        for (const foreignKey of foreignKeys) {
+            const column = columns.find(column => column.column_name === foreignKey.local_column);
+            if (!column) {
+                consoleMessage("WRN", `Key ${foreignKey} was not found in the columns of table ${tableName}.`);
+                continue;
+            }
+            if (column.is_nullable === "YES") {
+                text += "\tif (" + foreignKey.local_column + ") {\n";
+                text += "\t\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.foreign_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.foreign_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
+                text += "\t\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
+                text += "\t\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n";
+                text += "\t}\n\n"
+            } else {
+                text += "\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.foreign_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.foreign_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
+                text += "\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
+                text += "\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n\n";
+            }
         }
     }
     let query = "INSERT INTO " + tableSchema + "." + tableName + " (";
@@ -628,9 +705,11 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: any[], s
     query += ") VALUES (";
     let parameters = "";
     for (let i = 0; i < columns.length; i++) {
-        let dataType = columns[i].data_type;
-        if (dataType === "USER-DEFINED")
-            dataType = columns[i].udt_name;
+        let dataType = columns[i].udt_name;
+        if (dataType[0] === "_")
+            dataType = dataType.slice(1) + "[]";
+        else if (columns[i].data_type !== "USER-DEFINED")
+            dataType = columns[i].data_type;
         query += "$" + (i + 1) + "::" + dataType + ", ";
         parameters += columns[i].column_name + ", ";
     }

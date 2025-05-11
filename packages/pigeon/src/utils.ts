@@ -1,19 +1,21 @@
 /*
- * Copyright (c) 2024 Andreas Michael
+ * Copyright (c) 2025 Andreas Michael
  * This software is under the Apache 2.0 License
  */
 
 import pg from "pg";
+import {types} from "./maps.js";
+import {Database} from "./index.js";
 
 const {Client} = pg;
 
-export async function runQuery(command: string, parameters: any[], host: string, port: number, db: string, username: string, password: string): Promise<any | undefined> {
+export async function runQuery(command: string, parameters: any[], db: Database): Promise<any | undefined> {
     const client = new Client({
-        host: host,
-        port: port,
-        database: db,
-        user: username,
-        password: password,
+        host: db.host,
+        port: Number(db.port),
+        database: db.db,
+        user: db.user,
+        password: db.pass,
     });
     try {
         await client.connect();
@@ -165,4 +167,18 @@ export function getCombinations(valuesArray: any[]): any[][] {
 
     combinations.sort((a, b) => a.length - b.length);
     return combinations;
+}
+
+export function getType(dataType: string, udtName: string) {
+    let isArray = false;
+    if (dataType === "ARRAY") {
+        dataType = udtName.slice(1);
+        isArray = true;
+    }
+    let foundDataType = types.get(dataType);
+    if (foundDataType === undefined)
+        foundDataType = nameBeautifier(udtName).replaceAll(" ", "");
+    if (isArray)
+        foundDataType += "[]";
+    return foundDataType;
 }

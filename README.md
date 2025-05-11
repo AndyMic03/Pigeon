@@ -53,10 +53,16 @@ pigeon --config ./customPigeonConfig.json
 You can also use Pigeon programmatically in your TypeScript code.
 
 ```typescript
-import {runPigeon} from '@andymic/pigeon';
+import {Database, queryDB, runGeneration} from '@andymic/pigeon';
 
-const result = await runPigeon('output/directory', 'localhost', 5432, 'database', 'username', 'password');
-console.log(result.message);
+const database = new Database('localhost', '5432', 'database', 'username', 'password');
+const queryResult = await queryDB(database);
+if (queryResult instanceof PigeonError)
+    return queryResult;
+
+const generationResult = runGeneration('output/directory', database, queryResult.tables, queryResult.enums);
+if (generationResult instanceof PigeonError)
+    return generationResult;
 ```
 
 ## Configuration
