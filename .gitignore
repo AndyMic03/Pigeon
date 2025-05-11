@@ -4,5 +4,5 @@ packages/**/*.js
 packages/**/node_modules
 .DS_Store
 
-pigeon
+/pigeon
 .pigeon.json
