@@ -4,7 +4,7 @@
  */
 
 import pg from "pg";
-import {types} from "./maps.js";
+import {jsTypes} from "./maps.js";
 import {Database} from "./index.js";
 
 const {Client} = pg;
@@ -175,7 +175,7 @@ export function getType(dataType: string, udtName: string) {
         dataType = udtName.slice(1);
         isArray = true;
     }
-    let foundDataType = types.get(dataType);
+    let foundDataType = jsTypes.get(dataType);
     if (foundDataType === undefined)
         foundDataType = nameBeautifier(udtName).replaceAll(" ", "");
     if (isArray)

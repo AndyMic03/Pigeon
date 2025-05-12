@@ -34,10 +34,12 @@ npx pigeon [options]
 #### Options
 
 - `--init`: Sets up the config file. Creates a .pigeon.json file at the root of the project.
-- --guided: Run Pigeon using a question-based command line interface.
+- `--guided`: Run Pigeon using a question-based command line interface.
 - `--force`: Overwrites already existing files.
 - `--output` [path:String]: Output directory for the generated files.
 - `--config` [path:String]: Path to .pigeon.json config file.
+- `--pgAdmin` [path:String] path to the pgAdmin ERD file.
+- `--offline` (only with pgAdmin) does not contact the database
 
 #### Examples
 
@@ -46,6 +48,8 @@ pigeon --init
 pigeon --output C:/Users/User/Documents/Project
 pigeon --output ./generatedFiles --force
 pigeon --config ./customPigeonConfig.json
+pigeon --pgAdmin C:/Users/User/Documents/Project/ERD.json --offline
+pigeon --output C:/Users/User/Documents/Project/pigeon --pgAdmin C:/Users/User/Documents/Project/ERD.json
 ```
 
 ### Programmatic Usage
@@ -79,6 +83,14 @@ using the `--init` option.
   "password": "xxx"
 }
 ```
+
+## pgAdmin ERD
+
+Pigeon supports generating code from pgAdmin ERD files. To do that the necessary `--pgAdmin` flag needs to point to the
+ERD file.
+
+The `--offline` flag prevents any contact with the database. A side effect of that is that the enum labels cannot be
+populated.
 
 ## Contributing
 

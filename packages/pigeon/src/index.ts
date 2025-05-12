@@ -49,7 +49,7 @@ export class Database {
     }
 }
 
-class Table {
+export class Table {
     table_schema: string;
     table_name: string;
     columns: ColumnQueryRow[] = [];
@@ -67,7 +67,7 @@ class Table {
     }
 }
 
-class Enum {
+export class Enum {
     name: string;
     labels: string[];
 
@@ -77,17 +77,17 @@ class Enum {
     }
 }
 
-class ColumnQueryRow {
+export class ColumnQueryRow {
     column_name: string;
     ordinal_position: number;
-    column_default: string;
+    column_default: string | null;
     is_nullable: string;
     data_type: string;
     udt_name: string;
     is_identity: string;
-    identity_generation: string;
+    identity_generation: string | null;
 
-    constructor(column_name: string, ordinal_position: number, column_default: string, is_nullable: string, data_type: string, udt_name: string, is_identity: string, identity_generation: string) {
+    constructor(column_name: string, ordinal_position: number, column_default: string | null, is_nullable: string, data_type: string, udt_name: string, is_identity: string, identity_generation: string | null) {
         this.column_name = column_name;
         this.ordinal_position = ordinal_position;
         this.column_default = column_default;
@@ -99,7 +99,7 @@ class ColumnQueryRow {
     }
 }
 
-class PrimaryKeyQueryRow {
+export class PrimaryKeyQueryRow {
     column_name: string;
 
     constructor(column_name: string) {
@@ -107,14 +107,16 @@ class PrimaryKeyQueryRow {
     }
 }
 
-class ForeignKeyQueryRow {
+export class ForeignKeyQueryRow {
+    local_schema: string;
     local_table: string;
     local_column: string;
     foreign_schema: string;
     foreign_table: string;
     foreign_column: string;
 
-    constructor(local_table: string, local_column: string, foreign_schema: string, foreign_table: string, foreign_column: string) {
+    constructor(local_schema: string, local_table: string, local_column: string, foreign_schema: string, foreign_table: string, foreign_column: string) {
+        this.local_schema = local_schema
         this.local_table = local_table;
         this.local_column = local_column;
         this.foreign_schema = foreign_schema;
@@ -123,7 +125,7 @@ class ForeignKeyQueryRow {
     }
 }
 
-class UniqueQueryRow {
+export class UniqueQueryRow {
     columns: string[];
 
     constructor(columns: string[]) {
@@ -187,19 +189,7 @@ export function guided() {
     return {host, port, db, user, pass};
 }
 
-export async function queryDB(db: Database): Promise<{ tables: Table[], enums: Enum[] } | PigeonError> {
-    const tableQuery = await runQuery(
-        `SELECT table_schema, table_name
-         FROM information_schema.tables
-         WHERE table_type = 'BASE TABLE'
-           AND table_schema NOT IN
-               ('pg_catalog', 'information_schema');`,
-        [],
-        db
-    );
-    if (typeof tableQuery === "undefined")
-        return new PigeonError(1, "", new Error("An SQL error has occurred."))
-
+export async function enumsQuery(db: Database): Promise<Enum[] | PigeonError> {
     const customTypeQuery = await runQuery(
         `SELECT t.oid, t.typname
          FROM pg_type t
@@ -231,6 +221,25 @@ export async function queryDB(db: Database): Promise<{ tables: Table[], enums: E
             labels.push(enumLabel.enumlabel);
         enums.push(new Enum(type.typname, labels));
     }
+    return enums;
+}
+
+export async function queryDB(db: Database): Promise<{ tables: Table[], enums: Enum[] } | PigeonError> {
+    const tableQuery = await runQuery(
+        `SELECT table_schema, table_name
+         FROM information_schema.tables
+         WHERE table_type = 'BASE TABLE'
+           AND table_schema NOT IN
+               ('pg_catalog', 'information_schema');`,
+        [],
+        db
+    );
+    if (typeof tableQuery === "undefined")
+        return new PigeonError(1, "", new Error("An SQL error has occurred."))
+
+    const enums = await enumsQuery(db);
+    if (enums instanceof PigeonError)
+        return enums;
 
     const tables: Table[] = [];
     for (const table of tableQuery.rows) {
@@ -470,7 +479,7 @@ function createClass(tableName: string, columns: ColumnQueryRow[], primaryKey?: 
             text += "\t * A primary key representing the " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table.\n";
         else if (foreignKeys && foreignKeyIndex)
             text += "\t * A foreign key representing the " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table and referencing the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_column) + " in the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_table) + " table in the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_schema) + " schema.\n";
-        else if (column.column_name.toLowerCase().startsWith('is_'))
+        else if (column.column_name.toLowerCase().startsWith("is_"))
             text += "\t * Indicates whether this record in the table " + nameBeautifier(tableName) + " is currently " + nameBeautifier(column.column_name.slice(3)).toLowerCase() + ".\n";
         else
             text += "\t * The " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table.\n";
@@ -485,7 +494,7 @@ function createClass(tableName: string, columns: ColumnQueryRow[], primaryKey?: 
                     if (column.column_default)
                         text += " = new Date()";
                     else
-                        text += " = new Date(" + column.column_default.replace(' ', 'T') + ")";
+                        text += " = new Date(" + column.column_default.replace(" ", "T") + ")";
                 } else if (dataType === "number" || dataType === "boolean")
                     text += " = " + column.column_default;
                 else
@@ -506,7 +515,7 @@ function createClass(tableName: string, columns: ColumnQueryRow[], primaryKey?: 
         if (column.is_nullable === "YES")
             text += " | undefined";
         text += "} " + column.column_name;
-        if (!column.column_name.toLowerCase().startsWith('is_'))
+        if (!column.column_name.toLowerCase().startsWith("is_"))
             text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table. \n";
         else
             text += " - Indicates whether this record in the table " + nameBeautifier(tableName) + " is currently " + nameBeautifier(column.column_name.slice(3)).toLowerCase() + ".\n";
