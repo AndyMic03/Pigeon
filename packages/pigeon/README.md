@@ -20,12 +20,15 @@ Install with [npm](https://www.npmjs.com):
       --force   overwrites already existing files
       --output  [path:String] output directory for the generated files.
       --config  [path:String] path to .pigeon.json config file.
+      --pgAdmin [path:String] path to the pgAdmin ERD file.
+      --offline (only with pgAdmin) does not contact the database
  
     Examples
       $ pigeon --init
       $ pigeon --output C:/Users/User/Documents/Project
-      $ pigeon --output ./generatedFiles
+      $ pigeon --output ./generatedFiles --force
       $ pigeon --config ./customPigeonConfig.json
+      $ pigeon --pgAdmin C:/Users/User/Documents/Project/ERD.json --offline
       
     Exit Status
       Pigeon returns the following codes:
@@ -47,6 +50,14 @@ import {runPigeon} from '@andymic/pigeon';
 const result = await runPigeon('output/directory', 'localhost', 5432, 'database', 'username', 'password');
 console.log(result.message);
 ```
+
+### pgAdmin ERD
+
+Pigeon supports generating code from pgAdmin ERD files. To do that the necessary `--pgAdmin` flag needs to point to the
+ERD file.
+
+The `--offline` flag prevents any contact with the database. A side effect of that is that the enum labels cannot be
+populated.
 
 ## Configuration
 

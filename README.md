@@ -69,6 +69,14 @@ if (generationResult instanceof PigeonError)
     return generationResult;
 ```
 
+### pgAdmin ERD
+
+Pigeon supports generating code from pgAdmin ERD files. To do that the necessary `--pgAdmin` flag needs to point to the
+ERD file.
+
+The `--offline` flag prevents any contact with the database. A side effect of that is that the enum labels cannot be
+populated.
+
 ## Configuration
 
 Pigeon requires a configuration file `.pigeon.json` to connect to your PostgreSQL database. You can generate this file
@@ -83,14 +91,6 @@ using the `--init` option.
   "password": "xxx"
 }
 ```
-
-## pgAdmin ERD
-
-Pigeon supports generating code from pgAdmin ERD files. To do that the necessary `--pgAdmin` flag needs to point to the
-ERD file.
-
-The `--offline` flag prevents any contact with the database. A side effect of that is that the enum labels cannot be
-populated.
 
 ## Contributing
 
