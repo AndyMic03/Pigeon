@@ -116,6 +116,7 @@ export async function run(flags: any): Promise<void | PigeonError> {
         const generationResult = runGeneration(flags.output, database, tableProcessing(tables), enums);
         if (generationResult instanceof PigeonError)
             return generationResult;
+        return;
     }
     if (flags.guided) {
         const params = guided();

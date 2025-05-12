@@ -20,6 +20,7 @@ import prompt from "prompt-sync";
 
 import fs from "node:fs";
 import * as path from "node:path";
+import {jsTypes} from "./maps.js";
 
 export class PigeonError {
     exitCode: number;
@@ -489,15 +490,27 @@ function createClass(tableName: string, columns: ColumnQueryRow[], primaryKey?: 
 
         text += "\t" + column.column_name + ": " + dataType;
         if (column.column_default !== null) {
-            if (!column.column_default.includes("nextval")) {
+            let columnDefault = column.column_default.split("::")[0];
+            let type = column.column_default.split("::")[1];
+            if (!columnDefault.includes("nextval")) {
                 if (dataType === "Date") {
-                    if (column.column_default)
+                    if (columnDefault.toLowerCase() === "now()")
                         text += " = new Date()";
                     else
-                        text += " = new Date(" + column.column_default.replace(" ", "T") + ")";
+                        text += " = new Date(" + columnDefault.replace(" ", "T") + ")";
                 } else if (dataType === "number" || dataType === "boolean")
-                    text += " = " + column.column_default;
-                else
+                    text += " = " + columnDefault;
+                else if (type) {
+                    if (jsTypes.get(type) === "string")
+                        text += " = \"" + columnDefault + "\"";
+                    else {
+                        const jsType = jsTypes.get(type);
+                        if (jsType)
+                            text += " = " + columnDefault + " as " + jsType;
+                        else
+                            text += " = " + columnDefault + " as " + nameBeautifier(type).replaceAll(" ", "");
+                    }
+                } else
                     text += " = \"" + column.column_default + "\"";
             }
         }
