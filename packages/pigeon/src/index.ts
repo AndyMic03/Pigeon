@@ -5,9 +5,9 @@
 
 import {
     arrayMaker,
-    consoleMessage,
     getCombinations,
-    getType,
+    getJSType,
+    getPGType,
     nameBeautifier,
     queryMaker,
     runQuery,
@@ -50,21 +50,49 @@ export class Database {
     }
 }
 
-export class Table {
-    table_schema: string;
-    table_name: string;
-    columns: ColumnQueryRow[] = [];
-    primaryKey: PrimaryKeyQueryRow | undefined;
-    foreignKeys: ForeignKeyQueryRow[] | undefined;
-    unique: UniqueQueryRow | undefined;
+export class Column {
+    name: string;
+    position: number;
+    defaultValue: string | null;
+    isNullable: boolean;
+    jsType: string;
+    pgType: string;
+    isIdentity: boolean;
+    identityGeneration: string | null;
+    isPrimary: boolean;
+    isUnique: boolean;
+    isForeign: boolean;
+    foreignSchema?: string;
+    foreignTable?: string;
+    foreignColumn?: string;
 
-    constructor(table_schema: string, table_name: string, columns: ColumnQueryRow[], primaryKey: PrimaryKeyQueryRow | undefined, foreignKeys: ForeignKeyQueryRow[] | undefined, unique: UniqueQueryRow | undefined) {
-        this.table_schema = table_schema;
-        this.table_name = table_name;
+    constructor(name: string, position: number, defaultValue: string | null, isNullable: boolean, jsType: string, pgType: string, isIdentity: boolean, identityGeneration: string | null, isPrimary: boolean, isUnique: boolean, isForeign: boolean, foreignSchema?: string, foreignTable?: string, foreignColumn?: string) {
+        this.name = name;
+        this.position = position;
+        this.defaultValue = defaultValue;
+        this.isNullable = isNullable;
+        this.jsType = jsType;
+        this.pgType = pgType;
+        this.isIdentity = isIdentity;
+        this.identityGeneration = identityGeneration;
+        this.isPrimary = isPrimary;
+        this.isUnique = isUnique;
+        this.isForeign = isForeign;
+        this.foreignSchema = foreignSchema;
+        this.foreignTable = foreignTable;
+        this.foreignColumn = foreignColumn;
+    }
+}
+
+export class Table {
+    name: string;
+    schema: string;
+    columns: Column[] = [];
+
+    constructor(name: string, schema: string, columns: Column[]) {
+        this.name = name;
+        this.schema = schema;
         this.columns = columns;
-        this.primaryKey = primaryKey;
-        this.foreignKeys = foreignKeys;
-        this.unique = unique;
     }
 }
 
@@ -75,62 +103,6 @@ export class Enum {
     constructor(name: string, labels: string[]) {
         this.name = name;
         this.labels = labels;
-    }
-}
-
-export class ColumnQueryRow {
-    column_name: string;
-    ordinal_position: number;
-    column_default: string | null;
-    is_nullable: string;
-    data_type: string;
-    udt_name: string;
-    is_identity: string;
-    identity_generation: string | null;
-
-    constructor(column_name: string, ordinal_position: number, column_default: string | null, is_nullable: string, data_type: string, udt_name: string, is_identity: string, identity_generation: string | null) {
-        this.column_name = column_name;
-        this.ordinal_position = ordinal_position;
-        this.column_default = column_default;
-        this.is_nullable = is_nullable;
-        this.data_type = data_type;
-        this.udt_name = udt_name;
-        this.is_identity = is_identity;
-        this.identity_generation = identity_generation;
-    }
-}
-
-export class PrimaryKeyQueryRow {
-    column_name: string;
-
-    constructor(column_name: string) {
-        this.column_name = column_name;
-    }
-}
-
-export class ForeignKeyQueryRow {
-    local_schema: string;
-    local_table: string;
-    local_column: string;
-    foreign_schema: string;
-    foreign_table: string;
-    foreign_column: string;
-
-    constructor(local_schema: string, local_table: string, local_column: string, foreign_schema: string, foreign_table: string, foreign_column: string) {
-        this.local_schema = local_schema
-        this.local_table = local_table;
-        this.local_column = local_column;
-        this.foreign_schema = foreign_schema;
-        this.foreign_table = foreign_table;
-        this.foreign_column = foreign_column;
-    }
-}
-
-export class UniqueQueryRow {
-    columns: string[];
-
-    constructor(columns: string[]) {
-        this.columns = columns;
     }
 }
 
@@ -202,7 +174,7 @@ export async function enumsQuery(db: Database): Promise<Enum[] | PigeonError> {
         db
     );
     if (typeof customTypeQuery === "undefined")
-        return new PigeonError(1, "", new Error("An SQL error has occurred."))
+        return new PigeonError(1, "", new Error("An SQL error has occurred."));
 
     const enums = [];
     for (const type of customTypeQuery.rows) {
@@ -215,7 +187,7 @@ export async function enumsQuery(db: Database): Promise<Enum[] | PigeonError> {
             db
         );
         if (typeof enumQuery === "undefined")
-            return new PigeonError(1, "", new Error("An SQL error has occurred."))
+            return new PigeonError(1, "", new Error("An SQL error has occurred."));
 
         let labels = [];
         for (const enumLabel of enumQuery.rows)
@@ -236,7 +208,7 @@ export async function queryDB(db: Database): Promise<{ tables: Table[], enums: E
         db
     );
     if (typeof tableQuery === "undefined")
-        return new PigeonError(1, "", new Error("An SQL error has occurred."))
+        return new PigeonError(1, "", new Error("An SQL error has occurred."));
 
     const enums = await enumsQuery(db);
     if (enums instanceof PigeonError)
@@ -260,7 +232,7 @@ export async function queryDB(db: Database): Promise<{ tables: Table[], enums: E
             db
         );
         if (typeof columnQuery === "undefined")
-            return new PigeonError(1, "", new Error("An SQL error has occurred."))
+            return new PigeonError(1, "", new Error("An SQL error has occurred."));
 
         const pKeyQuery = await runQuery(
             `SELECT ku.column_name
@@ -274,7 +246,12 @@ export async function queryDB(db: Database): Promise<{ tables: Table[], enums: E
             db
         );
         if (typeof pKeyQuery === "undefined")
-            return new PigeonError(1, "", new Error("An SQL error has occurred."))
+            return new PigeonError(1, "", new Error("An SQL error has occurred."));
+
+        for (const pKey of pKeyQuery.rows)
+            for (const column of columnQuery.rows)
+                if (pKey.column_name === column.column_name)
+                    column.isPrimary = true;
 
         const fKeyQuery = await runQuery(
             `SELECT kcu1.table_schema AS local_schema,
@@ -300,7 +277,18 @@ export async function queryDB(db: Database): Promise<{ tables: Table[], enums: E
             db
         );
         if (typeof fKeyQuery === "undefined")
-            return new PigeonError(1, "", new Error("An SQL error has occurred."))
+            return new PigeonError(1, "", new Error("An SQL error has occurred."));
+
+        for (const fKey of fKeyQuery.rows) {
+            for (const column of columnQuery.rows) {
+                if (fKey.local_schema === table.table_schema && fKey.local_table === table.table_name && fKey.local_column === column.column_name) {
+                    column.isForeign = true;
+                    column.foreignSchema = fKey.foreign_schema;
+                    column.foreignTable = fKey.foreign_table;
+                    column.foreignColumn = fKey.foreign_column;
+                }
+            }
+        }
 
         const uniqueQuery = await runQuery(
             `SELECT array_agg(a.attname) AS columns
@@ -315,12 +303,23 @@ export async function queryDB(db: Database): Promise<{ tables: Table[], enums: E
             [table.table_schema, table.table_name],
             db);
         if (typeof uniqueQuery === "undefined")
-            return new PigeonError(1, "", new Error("An SQL error has occurred."))
+            return new PigeonError(1, "", new Error("An SQL error has occurred."));
 
         let uniques: string[] = [];
         if (uniqueQuery.rowCount > 0)
             uniques = uniqueQuery.rows[0].columns.slice(1, -1).split(",");
-        tables.push(new Table(table.table_schema, table.table_name, columnQuery.rows, pKeyQuery.rows[0], fKeyQuery.rows, {columns: uniques}));
+
+        for (const unique of uniques)
+            for (const column of columnQuery.rows)
+                if (unique === column.column_name)
+                    column.isUnique = true;
+
+        const columns: Column[] = [];
+        for (const column of columnQuery.rows) {
+            columns.push(new Column(column.column_name, column.ordinal_position, column.column_default, column.is_nullable === "YES", getJSType(column.data_type, column.udt_name, column.is_nullable === "YES"), getPGType(column.data_type, column.udt_name), column.is_identity === "YES", column.identity_generation, column.isPrimary || false, column.isUnique || false, column.isForeign || false, column.foreignSchema, column.foreignTable, column.foreignColumn));
+        }
+
+        tables.push(new Table(table.table_name, table.table_schema, columns));
     }
     return {
         tables: tables,
@@ -329,17 +328,17 @@ export async function queryDB(db: Database): Promise<{ tables: Table[], enums: E
 }
 
 
-export function runGeneration(dir: string, db: Database, tables: Table[] | undefined, enums: Enum[] | undefined): void | PigeonError {
-    if (!tables)
+export function runGeneration(dir: string, db: Database, tables: Table[], enums?: Enum[]): void | PigeonError {
+    if (tables.length === 0)
         return new PigeonError(1, "", new Error("No tables were found."));
     const dirResult = createDir(dir);
     if (dirResult instanceof PigeonError)
         return dirResult;
     let schemas: string[] = [];
     for (const table of tables) {
-        if (schemas.includes(table.table_schema))
+        if (schemas.includes(table.schema))
             continue;
-        schemas.push(table.table_schema);
+        schemas.push(table.schema);
     }
     for (const schema of schemas) {
         const dirResult = createDir(path.join(dir, schema));
@@ -354,7 +353,7 @@ export function runGeneration(dir: string, db: Database, tables: Table[] | undef
         if (enums) {
             for (const cEnum of enums) {
                 for (const column of table.columns) {
-                    if (cEnum.name === column.udt_name) {
+                    if (column.pgType.includes(cEnum.name)) {
                         const enumName = nameBeautifier(cEnum.name).replaceAll(" ", "");
                         ts += "/**\n An Enum representing the " + nameBeautifier(cEnum.name).toLowerCase() + ".\n * @readonly\n * @enum {string}\n */\n";
                         ts += "class " + enumName + " {\n";
@@ -372,22 +371,17 @@ export function runGeneration(dir: string, db: Database, tables: Table[] | undef
             }
         }
 
-        ts += createClass(table.table_name, table.columns, table.primaryKey?.column_name, table.foreignKeys);
+        ts += createClass(table.name, table.columns);
         ts += "\n\n";
-        ts += createGetAll(table.table_schema, table.table_name, table.columns);
+        ts += createGetAll(table.schema, table.name, table.columns);
         ts += "\n\n";
 
-        let keys = [];
-        if (table.primaryKey)
-            keys.push(table.primaryKey.column_name);
-        if (table.foreignKeys)
-            for (const fKey of table.foreignKeys)
-                keys.push(fKey.local_column.replaceAll(" ", ""));
-        if (table.unique)
-            keys = keys.concat(table.unique.columns);
-        keys = [...new Set(keys)];
+        let keys: Column[] = [];
+        for (const column of table.columns)
+            if (column.isPrimary || column.isForeign || column.isUnique)
+                keys.push(column);
         for (const keyCombination of getCombinations(keys)) {
-            ts += createGet(table.table_schema, table.table_name, table.columns, keyCombination);
+            ts += createGet(table.schema, table.name, table.columns, keyCombination);
             ts += "\n\n";
         }
 
@@ -395,17 +389,17 @@ export function runGeneration(dir: string, db: Database, tables: Table[] | undef
         let softDefaults = [];
         let hardDefaults = [];
         for (const column of table.columns) {
-            if (column.column_default === null && column.is_identity === "NO")
+            if (column.defaultValue === null && !column.isIdentity)
                 nonDefaults.push(column);
-            else if ((column.column_default !== null && !column.column_default.includes("nextval")) || (column.is_identity === "YES" && column.identity_generation === "BY DEFAULT"))
+            else if ((column.defaultValue !== null && !column.defaultValue.includes("nextval")) || (column.isIdentity && column.identityGeneration === "BY DEFAULT"))
                 softDefaults.push(column);
-            else if ((column.column_default !== null && column.column_default.includes("nextval")) || (column.is_identity === "YES" && column.identity_generation === "ALWAYS"))
+            else if ((column.defaultValue !== null && column.defaultValue.includes("nextval")) || (column.isIdentity && column.identityGeneration === "ALWAYS"))
                 hardDefaults.push(column);
         }
 
-        ts += createAdd(table.table_schema, table.table_name, nonDefaults, [], hardDefaults.concat(softDefaults), table.foreignKeys) + "\n\n";
+        ts += createAdd(table.schema, table.name, nonDefaults, [], hardDefaults.concat(softDefaults)) + "\n\n";
         for (const softCombination of getCombinations(softDefaults))
-            ts += createAdd(table.table_schema, table.table_name, nonDefaults, softCombination, hardDefaults.concat(softDefaults.filter(n => !getCombinations(softDefaults).includes([n]))), table.foreignKeys) + "\n\n";
+            ts += createAdd(table.schema, table.name, nonDefaults, softCombination, hardDefaults.concat(softDefaults.filter(n => !getCombinations(softDefaults).includes([n])))) + "\n\n";
         ts = ts.slice(0, -2);
 
         const regex = /import ({?.*?}?) from "(.*?)";\n/g;
@@ -453,52 +447,38 @@ export function runGeneration(dir: string, db: Database, tables: Table[] | undef
         importString += "const {Client} = pg;\n\n";
         ts = importString + ts;
 
-        fs.writeFileSync(path.join(dir, table.table_schema, table.table_name + ".ts"), ts);
+        fs.writeFileSync(path.join(dir, table.schema, table.name + ".ts"), ts);
     }
 }
 
-function createClass(tableName: string, columns: ColumnQueryRow[], primaryKey?: string, foreignKeys?: ForeignKeyQueryRow[]): string {
+function createClass(tableName: string, columns: Column[]): string {
     let text = "";
     text += "export class " + singularize(nameBeautifier(tableName)).replaceAll(" ", "") + " {\n";
     for (const column of columns) {
-        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
-        if (column.is_nullable === "YES")
-            dataType += " | undefined";
-
-        let isPrimaryKey = false;
-        if (column.column_name === primaryKey)
-            isPrimaryKey = true;
-
-        let foreignKeyIndex;
-        if (foreignKeys)
-            for (let i = 0; i < foreignKeys.length; i++)
-                if (foreignKeys[i].local_column === column.column_name)
-                    foreignKeyIndex = i;
-
         text += "\t/**\n";
-        if (isPrimaryKey)
-            text += "\t * A primary key representing the " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table.\n";
-        else if (foreignKeys && foreignKeyIndex)
-            text += "\t * A foreign key representing the " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table and referencing the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_column) + " in the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_table) + " table in the " + nameBeautifier(foreignKeys[foreignKeyIndex].foreign_schema) + " schema.\n";
-        else if (column.column_name.toLowerCase().startsWith("is_"))
-            text += "\t * Indicates whether this record in the table " + nameBeautifier(tableName) + " is currently " + nameBeautifier(column.column_name.slice(3)).toLowerCase() + ".\n";
+        if (column.isPrimary)
+            text += "\t * A primary key representing the " + nameBeautifier(column.name) + " for the " + nameBeautifier(tableName) + " table.\n";
+        else if (column.isForeign && column.foreignColumn && column.foreignTable && column.foreignSchema)
+            text += "\t * A foreign key representing the " + nameBeautifier(column.name) + " for the " + nameBeautifier(tableName) + " table and referencing the " + nameBeautifier(column.foreignColumn) + " in the " + nameBeautifier(column.foreignTable) + " table in the " + nameBeautifier(column.foreignSchema) + " schema.\n";
+        else if (column.name.toLowerCase().startsWith("is_"))
+            text += "\t * Indicates whether this record in the table " + nameBeautifier(tableName) + " is currently " + nameBeautifier(column.name.slice(3)).toLowerCase() + ".\n";
         else
-            text += "\t * The " + nameBeautifier(column.column_name) + " for the " + nameBeautifier(tableName) + " table.\n";
+            text += "\t * The " + nameBeautifier(column.name) + " for the " + nameBeautifier(tableName) + " table.\n";
 
-        text += "\t * @type {" + dataType + "}\n";
+        text += "\t * @type {" + column.jsType + "}\n";
         text += "\t */\n";
 
-        text += "\t" + column.column_name + ": " + dataType;
-        if (column.column_default !== null) {
-            let columnDefault = column.column_default.split("::")[0];
-            let type = column.column_default.split("::")[1];
+        text += "\t" + column.name + ": " + column.jsType;
+        if (column.defaultValue !== null) {
+            let columnDefault = column.defaultValue.split("::")[0];
+            let type = column.defaultValue.split("::")[1];
             if (!columnDefault.includes("nextval")) {
-                if (dataType === "Date") {
+                if (column.jsType === "Date") {
                     if (columnDefault.toLowerCase() === "now()")
                         text += " = new Date()";
                     else
                         text += " = new Date(" + columnDefault.replace(" ", "T") + ")";
-                } else if (dataType === "number" || dataType === "boolean")
+                } else if (column.jsType.includes("number") || column.jsType.includes("boolean"))
                     text += " = " + columnDefault;
                 else if (type) {
                     if (jsTypes.get(type) === "string")
@@ -511,7 +491,7 @@ function createClass(tableName: string, columns: ColumnQueryRow[], primaryKey?: 
                             text += " = " + columnDefault + " as " + nameBeautifier(type).replaceAll(" ", "");
                     }
                 } else
-                    text += " = \"" + column.column_default + "\"";
+                    text += " = \"" + column.defaultValue + "\"";
             }
         }
         text += ";\n"
@@ -522,31 +502,21 @@ function createClass(tableName: string, columns: ColumnQueryRow[], primaryKey?: 
     text += "\t * Creates a new object for the " + nameBeautifier(tableName) + " table.\n";
     text += "\t * \n"
     for (const column of columns) {
-        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
-        text += "\t * ";
-        text += "@param {" + dataType;
-        if (column.is_nullable === "YES")
-            text += " | undefined";
-        text += "} " + column.column_name;
-        if (!column.column_name.toLowerCase().startsWith("is_"))
-            text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table. \n";
+        text += "\t * @param {" + column.jsType + "} " + column.name;
+        if (!column.name.toLowerCase().startsWith("is_"))
+            text += " - The " + nameBeautifier(column.name) + " of the " + nameBeautifier(tableName) + " table. \n";
         else
-            text += " - Indicates whether this record in the table " + nameBeautifier(tableName) + " is currently " + nameBeautifier(column.column_name.slice(3)).toLowerCase() + ".\n";
+            text += " - Indicates whether this record in the table " + nameBeautifier(tableName) + " is currently " + nameBeautifier(column.name.slice(3)).toLowerCase() + ".\n";
     }
     text += "\t */\n";
     text += "\tconstructor(";
-    for (const column of columns) {
-        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
-        text += column.column_name + ": " + dataType;
-        if (column.is_nullable === "YES")
-            text += " | undefined";
-        text += ", ";
-    }
+    for (const column of columns)
+        text += column.name + ": " + column.jsType + ", ";
     text = text.slice(0, -2);
     text += ") {\n";
 
     for (const column of columns)
-        text += "\t\tthis." + column.column_name + " = " + column.column_name + ";\n";
+        text += "\t\tthis." + column.name + " = " + column.name + ";\n";
     text += "\t}\n";
     text += "}";
     return text;
@@ -564,7 +534,7 @@ export function clientMaker(baseTabs: number, db: Database): string {
     return text;
 }
 
-function createGetAll(tableSchema: string, tableName: string, columns: ColumnQueryRow[]): string {
+function createGetAll(tableSchema: string, tableName: string, columns: Column[]): string {
     let text = "";
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
     const varName = nameBeautifier(tableName).replaceAll(" ", "")[0].toLowerCase() + nameBeautifier(tableName).replaceAll(" ", "").substring(1);
@@ -582,60 +552,39 @@ function createGetAll(tableSchema: string, tableName: string, columns: ColumnQue
     return text;
 }
 
-function createGet(tableSchema: string, tableName: string, columns: ColumnQueryRow[], keys: string[]): string {
+function createGet(tableSchema: string, tableName: string, columns: Column[], keys: Column[]): string {
     let text = "";
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
     const varName = nameBeautifier(tableName).replaceAll(" ", "")[0].toLowerCase() + nameBeautifier(tableName).replaceAll(" ", "").substring(1);
     text += "/**\n";
     text += " * Gets " + className + " objects from the database by ";
     for (const key of keys)
-        text += key + " and ";
+        text += key.name + " and ";
     text = text.slice(0, -5) + ".\n";
     text += " *\n";
-    for (const key of keys) {
-        const column = columns.find(column => column.column_name === key);
-        if (!column) {
-            consoleMessage("WRN", `Key ${key} was not found in the columns of table ${tableName}.`);
-            continue;
-        }
-        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
-        text += " * ";
-        text += "@param {" + dataType;
-        text += "} " + column.column_name;
-        text += " - The " + nameBeautifier(column.column_name) + " of the " + nameBeautifier(tableName) + " table.\n";
-    }
+    for (const key of keys)
+        text += " * @param {" + key.jsType + "} " + key.name + " - The " + nameBeautifier(key.name) + " of the " + nameBeautifier(tableName) + " table.\n";
     text += " * @returns {Promise<" + className + "[]>} - A Promise object returning an array of " + nameBeautifier(tableName) + ".\n";
     text += " */\n";
     text += "export async function get" + nameBeautifier(tableName).replaceAll(" ", "") + "By";
     for (const key of keys)
-        text += nameBeautifier(key).replaceAll(" ", "") + "And";
+        text += nameBeautifier(key.name).replaceAll(" ", "") + "And";
     text = text.slice(0, -3);
     text += "(";
-    for (const key of keys) {
-        const column = columns.find(column => column.column_name === key);
-        if (!column) {
-            consoleMessage("WRN", `Key ${key} was not found in the columns of table ${tableName}.`);
-            continue;
-        }
-        text += key + ": " + getType(column.data_type, column.udt_name) + ", ";
-    }
+    for (const key of keys)
+        text += key.name + ": " + key.jsType + ", ";
     text = text.slice(0, -2);
     text += "): Promise<" + className + "[]> {\n";
     text += "\tif (";
     for (const key of keys)
-        text += key + " === undefined || ";
+        text += key.name + " === undefined || ";
     text = text.slice(0, -4);
     text += ")\n" + "\t\tthrow \"Missing Parameters\";\n\n";
     let query = "SELECT * FROM " + tableSchema + "." + tableName + " WHERE ";
     let parameters = "";
     for (let i = 0; i < keys.length; i++) {
-        const column = columns.find(column => column.column_name === keys[i]);
-        if (!column) {
-            consoleMessage("WRN", `Key ${keys[i]} was not found in the columns of table ${tableName}.`);
-            continue;
-        }
-        query += keys[i] + " = " + "$" + (i + 1) + "::" + (column.data_type || column.udt_name) + " AND ";
-        parameters += keys[i] + ", ";
+        query += keys[i].name + " = " + "$" + (i + 1) + "::" + keys[i].pgType + " AND ";
+        parameters += keys[i].name + ", ";
     }
     query = query.slice(0, -5) + ";";
     parameters = parameters.slice(0, -2);
@@ -647,38 +596,35 @@ function createGet(tableSchema: string, tableName: string, columns: ColumnQueryR
     return text;
 }
 
-function createAdd(tableSchema: string, tableName: string, nonDefaults: ColumnQueryRow[], softDefaults: ColumnQueryRow[], hardDefaults: ColumnQueryRow[], foreignKeys?: ForeignKeyQueryRow[]): string {
+function createAdd(tableSchema: string, tableName: string, nonDefaults: Column[], softDefaults: Column[], hardDefaults: Column[]): string {
     let text = "";
     const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
-    if (foreignKeys) {
-        for (const foreignKey of foreignKeys) {
-            if ((tableSchema === foreignKey.foreign_schema) && (tableName === foreignKey.foreign_table))
+    let hasForeign = false;
+    for (const column of nonDefaults.concat(softDefaults).concat(hardDefaults).sort((a, b) => a.position - b.position)) {
+        if (column.isForeign && column.foreignColumn && column.foreignTable && column.foreignSchema) {
+            hasForeign = true;
+            if ((tableSchema === column.foreignSchema) && (tableName === column.foreignTable))
                 continue;
-            text += "import {get" + nameBeautifier(foreignKey.foreign_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.foreign_column).replaceAll(" ", "") + "} from \".";
-            if (tableSchema !== foreignKey.foreign_schema)
-                text += "./" + foreignKey.foreign_schema;
-            text += "/" + foreignKey.foreign_table + ".js\";\n";
+            text += "import {get" + nameBeautifier(column.foreignTable).replaceAll(" ", "") + "By" + nameBeautifier(column.foreignColumn).replaceAll(" ", "") + "} from \".";
+            if (tableSchema !== column.foreignSchema)
+                text += "./" + column.foreignSchema;
+            text += "/" + column.foreignTable + ".js\";\n";
         }
     }
     text += "/**\n";
     text += " * Adds the provided " + className + " object to the database.\n";
     text += " *\n";
     let columns = nonDefaults.concat(softDefaults);
-    columns.sort((a, b) => a.ordinal_position - b.ordinal_position);
-    for (const column of columns) {
-        let dataType = getType(column.data_type, column.udt_name).replaceAll(" ", "");
-        text += " * ";
-        text += "@param {" + dataType;
-        if (column.is_nullable === "YES")
-            text += " | undefined";
-        text += "} " + column.column_name;
-        text += " - The " + nameBeautifier(column.column_name) + " to be inserted into the " + nameBeautifier(tableName) + " table.\n";
-    }
+    columns.sort((a, b) => a.position - b.position);
+    for (const column of columns)
+        text += " * @param {" + column.jsType + "} " + column.name + " - The " + nameBeautifier(column.name) + " to be inserted into the " + nameBeautifier(tableName) + " table.\n";
+
     text += " * @returns {Promise<" + className + ">} - A Promise object returning the inserted " + nameBeautifier(tableName) + ".\n";
-    if (foreignKeys && foreignKeys.length > 0) {
+    if (hasForeign) {
         text += " * @throws string An exception in the case of the "
-        for (const foreignKey of foreignKeys)
-            text += nameBeautifier(foreignKey.local_column) + " or the "
+        for (const column of columns)
+            if (column.isForeign)
+                text += nameBeautifier(column.name) + " or the "
         text = text.slice(0, -8);
         text += " not existing in their table.\n"
     }
@@ -687,53 +633,42 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: ColumnQu
     if (softDefaults.length > 0) {
         text += "With";
         for (const softDefault of softDefaults)
-            text += nameBeautifier(softDefault.column_name).replaceAll(" ", "") + "And";
+            text += nameBeautifier(softDefault.name).replaceAll(" ", "") + "And";
         text = text.slice(0, -3);
     }
     text += "(";
-    for (const column of columns) {
-        let dataType = getType(column.data_type, column.udt_name);
-        text += column.column_name + ": " + dataType;
-        if (column.is_nullable === "YES")
-            text += " | undefined";
-        text += ", ";
-    }
+    for (const column of columns)
+        text += column.name + ": " + column.jsType + ", ";
+
     text = text.slice(0, -2);
     text += "): Promise<" + className + "> {\n";
-    if (foreignKeys) {
-        for (const foreignKey of foreignKeys) {
-            const column = columns.find(column => column.column_name === foreignKey.local_column);
-            if (!column) {
-                consoleMessage("WRN", `Key ${foreignKey} was not found in the columns of table ${tableName}.`);
-                continue;
-            }
-            if (column.is_nullable === "YES") {
-                text += "\tif (" + foreignKey.local_column + ") {\n";
-                text += "\t\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.foreign_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.foreign_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
-                text += "\t\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
-                text += "\t\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n";
-                text += "\t}\n\n"
-            } else {
-                text += "\tconst verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + " = await get" + nameBeautifier(foreignKey.foreign_table).replaceAll(" ", "") + "By" + nameBeautifier(foreignKey.foreign_column).replaceAll(" ", "") + "(" + foreignKey.local_column + ");\n";
-                text += "\tif (verify" + nameBeautifier(foreignKey.local_column).replaceAll(" ", "") + ".length === 0)\n";
-                text += "\t\tthrow \"The " + nameBeautifier(foreignKey.local_column) + " provided does not exist.\";\n\n";
+    if (hasForeign) {
+        for (const column of columns) {
+            if (column.isForeign && column.foreignColumn && column.foreignTable && column.foreignSchema) {
+                const name = nameBeautifier(column.name).replaceAll(" ", "");
+                if (column.isNullable) {
+                    text += "\tif (" + column.name + ") {\n";
+                    text += "\t\tconst verify" + name + " = await get" + nameBeautifier(column.foreignTable).replaceAll(" ", "") + "By" + nameBeautifier(column.foreignColumn).replaceAll(" ", "") + "(" + column.name + ");\n";
+                    text += "\t\tif (verify" + name + ".length === 0)\n";
+                    text += "\t\t\tthrow \"The " + nameBeautifier(column.name) + " provided does not exist.\";\n";
+                    text += "\t}\n\n"
+                } else {
+                    text += "\tconst verify" + name + " = await get" + nameBeautifier(column.foreignTable).replaceAll(" ", "") + "By" + nameBeautifier(column.foreignColumn).replaceAll(" ", "") + "(" + column.name + ");\n";
+                    text += "\tif (verify" + name + ".length === 0)\n";
+                    text += "\t\tthrow \"The " + nameBeautifier(column.name) + " provided does not exist.\";\n\n";
+                }
             }
         }
     }
     let query = "INSERT INTO " + tableSchema + "." + tableName + " (";
     for (const column of columns)
-        query += column.column_name + ", ";
+        query += column.name + ", ";
     query = query.slice(0, -2);
     query += ") VALUES (";
     let parameters = "";
     for (let i = 0; i < columns.length; i++) {
-        let dataType = columns[i].udt_name;
-        if (dataType[0] === "_")
-            dataType = dataType.slice(1) + "[]";
-        else if (columns[i].data_type !== "USER-DEFINED")
-            dataType = columns[i].data_type;
-        query += "$" + (i + 1) + "::" + dataType + ", ";
-        parameters += columns[i].column_name + ", ";
+        query += "$" + (i + 1) + "::" + columns[i].pgType + ", ";
+        parameters += columns[i].name + ", ";
     }
     query = query.slice(0, -2);
     parameters = parameters.slice(0, -2);
@@ -743,9 +678,9 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: ColumnQu
     text += "\treturn new " + className + "(\n";
     columns = columns.concat(hardDefaults);
     columns = [...new Set(columns)];
-    columns.sort((a, b) => a.ordinal_position - b.ordinal_position);
+    columns.sort((a, b) => a.position - b.position);
     for (const column of columns)
-        text += "\t\tinsertQuery.rows[0]." + column.column_name + ",\n";
+        text += "\t\tinsertQuery.rows[0]." + column.name + ",\n";
     text = text.slice(0, -2);
     text += "\n";
     text += "\t);\n";

@@ -3,8 +3,8 @@
  * This software is under the Apache 2.0 License
  */
 
-import {ColumnQueryRow, ForeignKeyQueryRow, PigeonError, PrimaryKeyQueryRow, Table, UniqueQueryRow} from "./index.js";
-import {udtTypes} from "./maps.js";
+import {Column, PigeonError, Table,} from "./index.js";
+import {getJSType, getPGType, getTypesByDataType} from "./utils.js";
 
 function objectToArray(json: string) {
     let arrayJSON = "";
@@ -59,77 +59,70 @@ export function tableProcessing(tables: any[]): Table[] {
     const pigeonTables: Table[] = [];
     for (const table of tables) {
         const data = table.otherInfo.data;
-        const columns: ColumnQueryRow[] = [];
+        const columns: Column[] = [];
         let ordinalPossition = 1;
         for (const column of data.columns) {
-            let dataType: string = column.cltype;
-            let udtType: string | undefined;
-            udtType = udtTypes.get(dataType);
-            if (!udtType) {
-                if (dataType.endsWith("[]")) {
-                    udtType = "_" + udtTypes.get(dataType.slice(0, -2));
-                    dataType = "ARRAY";
-                } else {
-                    udtType = dataType;
-                    dataType = "USER-DEFINED";
-                }
-            }
-            if (dataType === "smallserial" || dataType === "serial" || dataType === "bigserial") {
-                dataType = dataType.replace("serial", "int");
-                if (dataType === "int")
-                    dataType = "integer";
-                column.defval = "nextval('" + data.name + "_" + column.name + "_seq'::regclass)";
-            }
+            const types = getTypesByDataType(column.cltype);
 
-            let isNullable;
+            let isNullable = true;
             if (column.attnotnull)
-                isNullable = "NO";
-            else
-                isNullable = "YES";
+                isNullable = false;
 
+            const jsType = getJSType(types.dataType, types.udtName, isNullable);
+            const pgType = getPGType(types.dataType);
+
+            if (column.cltype.contains("serial"))
+                column.defval = "nextval('" + data.name + "_" + column.name + "_seq'::regclass)";
             let columnDefault;
             if (column.defval !== "" && column.defval !== undefined)
                 columnDefault = column.defval;
             else
                 columnDefault = null;
 
-            let identity;
+            let identity = false;
             if (column.colconstype === "i")
-                identity = "YES";
-            else
-                identity = "NO";
+                identity = true;
 
             let identityGeneration = null;
-            if (identity === "YES") {
+            if (identity) {
                 if (column.attidentity === "a")
                     identityGeneration = "ALWAYS";
                 if (column.attidentity === "b")
                     identityGeneration = "BY DEFAULT";
             }
 
-            columns.push(new ColumnQueryRow(column.name, ordinalPossition, columnDefault, isNullable, dataType, udtType, identity, identityGeneration));
+            let isPrimary = false;
+            if (column.name === data.primary_key[0].columns[0].column)
+                isPrimary = true;
+
+            let isForeign = false;
+            let foreignSchema = undefined;
+            let foreignTable = undefined;
+            let foreignColumn = undefined;
+            for (const foreignKey of data.foreign_key) {
+                for (const foreignKeyColumn of foreignKey.columns) {
+                    if (foreignKeyColumn.local_column === column.name) {
+                        isForeign = true;
+                        const match = foreignKeyColumn.references_table_name.match(/(?:\((.*?)\))? ?(.*)/);
+                        foreignSchema = match[1] || data.schema;
+                        foreignTable = match[2];
+                        foreignColumn = foreignKeyColumn.referenced;
+                    }
+                }
+            }
+
+            let isUnique = false;
+            if (data.unique_constraint)
+                for (const uniqueConstraint of data.unique_constraint)
+                    for (const uniqueColumn of uniqueConstraint.columns)
+                        if (uniqueColumn.column === column.name)
+                            isUnique = true;
+
+            columns.push(new Column(column.name, ordinalPossition, columnDefault, isNullable, jsType, pgType, identity, identityGeneration, isPrimary, isUnique, isForeign, foreignSchema, foreignTable, foreignColumn));
             ordinalPossition++;
         }
 
-        let primaryKey = undefined;
-        if (data.primary_key[0]?.columns[0]?.column)
-            primaryKey = new PrimaryKeyQueryRow(data.primary_key[0].columns[0].column);
-
-        const foreignKeys: ForeignKeyQueryRow[] = [];
-        for (const foreignKey of data.foreign_key) {
-            for (const column of foreignKey.columns) {
-                const match = column.references_table_name.match(/(?:\((.*?)\))? ?(.*)/);
-                foreignKeys.push(new ForeignKeyQueryRow(data.schema, data.name, column.local_column, match[1] || data.schema, match[2], column.referenced));
-            }
-        }
-
-        const uniqueConstraints: string[] = [];
-        if (data.unique_constraint)
-            for (const uniqueConstraint of data.unique_constraint)
-                for (const column of uniqueConstraint.columns)
-                    uniqueConstraints.push(column.column);
-
-        pigeonTables.push(new Table(data.schema, data.name, columns, primaryKey, foreignKeys, new UniqueQueryRow(uniqueConstraints)));
+        pigeonTables.push(new Table(data.name, data.schema, columns));
     }
     return pigeonTables;
 }

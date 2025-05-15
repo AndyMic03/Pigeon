@@ -4,8 +4,8 @@
  */
 
 import pg from "pg";
-import {jsTypes} from "./maps.js";
-import {Database} from "./index.js";
+import {jsTypes, udtTypes} from "./maps.js";
+import {Column, Database} from "./index.js";
 
 const {Client} = pg;
 
@@ -122,13 +122,13 @@ function queryBeautifier(baseTabs: number, command: string): string {
     return formated;
 }
 
-export function arrayMaker(baseTabs: number, variableName: string, className: string, columns: any[]): string {
+export function arrayMaker(baseTabs: number, variableName: string, className: string, columns: Column[]): string {
     let array: string = "";
     array += tabsInserter(baseTabs) + "let " + variableName + ": " + className + "[] = [];\n";
     array += tabsInserter(baseTabs) + "for (const row of " + variableName + "Query.rows)\n";
     array += tabsInserter(baseTabs + 1) + variableName + ".push(new " + className + "(\n";
     for (const column of columns)
-        array += tabsInserter(baseTabs + 2) + "row." + column.column_name + ",\n";
+        array += tabsInserter(baseTabs + 2) + "row." + column.name + ",\n";
     array = array.slice(0, -2) + "\n";
     array += tabsInserter(baseTabs + 1) + "));";
     return array;
@@ -169,7 +169,10 @@ export function getCombinations(valuesArray: any[]): any[][] {
     return combinations;
 }
 
-export function getType(dataType: string, udtName: string) {
+export function getJSType(dataType: string, udtName: string, isNullable: boolean): string {
+    dataType = dataType.replace("serial", "int");
+    if (dataType === "int")
+        dataType = "integer";
     let isArray = false;
     if (dataType === "ARRAY") {
         dataType = udtName.slice(1);
@@ -180,5 +183,42 @@ export function getType(dataType: string, udtName: string) {
         foundDataType = nameBeautifier(udtName).replaceAll(" ", "");
     if (isArray)
         foundDataType += "[]";
+    if (isNullable)
+        foundDataType += " | undefined";
     return foundDataType;
+}
+
+export function getTypesByDataType(dataType: string): { dataType: string; udtName: string } {
+    let udtName: string | undefined;
+    udtName = udtTypes.get(dataType);
+
+    if (!udtName) {
+        if (dataType.endsWith("[]")) {
+            udtName = "_" + udtTypes.get(dataType.slice(0, -2));
+            dataType = "ARRAY";
+        } else {
+            udtName = dataType;
+            dataType = "USER-DEFINED";
+        }
+    }
+    return {
+        dataType: dataType,
+        udtName: udtName
+    };
+}
+
+export function getPGType(dataType: string, udtName?: string): string {
+    if (!udtName) {
+        const types = getTypesByDataType(dataType);
+        udtName = types.udtName;
+    }
+    dataType = dataType.replace("serial", "int");
+    if (dataType === "int")
+        dataType = "integer";
+    let pgType = udtName;
+    if (dataType.endsWith("[]"))
+        pgType = pgType.slice(1) + "[]";
+    else if (dataType !== "USER-DEFINED")
+        pgType = dataType;
+    return pgType;
 }

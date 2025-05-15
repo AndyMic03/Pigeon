@@ -4,66 +4,89 @@
  */
 
 export const jsTypes = new Map<string, string>([
-    ["bigint", "number"],
-    ["int8", "number"],
-    ["bigserial", "number"],
-    ["serial8", "number"],
-    ["bit", "Array"],
-    ["bit varying", "Array"],
-    ["varbit", "Array"],
-    ["boolean", "boolean"],
-    ["bool", "boolean"],
-    ["box", ""],
-    ["bytea", "Array"],
+    // Numeric Types
+    ["smallint", "number"],
+    ["int2", "number"],
+    ["integer", "number"],
+    ["int", "number"],
+    ["bigint", "string"],
+    ["int8", "string"],
+    ["real", "number"],
+    ["float4", "number"],
+    ["double precision", "number"],
+    ["float8", "string"],
+    ["numeric", "string"],
+    ["decimal", "string"],
+    ["money", "string"],
+
+    // Serial Types
+    ["smallserial", "number"],
+    ["serial2", "number"],
+    ["serial", "number"],
+    ["serial4", "number"],
+    ["bigserial", "string"],
+    ["serial8", "string"],
+
+    // Character Types
     ["character", "string"],
     ["char", "string"],
     ["character varying", "string"],
     ["varchar", "string"],
-    ["cidr", "string"],
-    ["circle", ""],
-    ["date", "Date"],
-    ["double precision", "number"],
-    ["float8", "number"],
-    ["inet", "string"],
-    ["integer", "number"],
-    ["int", "number"],
-    ["int4", "number"],
-    ["interval", ""],
-    ["json", "string"],
-    ["jsonb", "Array"],
-    ["line", ""],
-    ["lseg", ""],
-    ["macaddr", "string"],
-    ["macaddr8", "string"],
-    ["money", "number"],
-    ["numeric", "number"],
-    ["decimal", "number"],
-    ["path", ""],
-    ["pg_lsn", "number"],
-    ["pg_snapshot", ""],
-    ["point", ""],
-    ["polygon", ""],
-    ["real", "number"],
-    ["float4", "number"],
-    ["smallint", "number"],
-    ["int2", "number"],
-    ["smallserial", "number"],
-    ["serial2", "number"],
-    ["serial", "number"],
-    ["string4", "number"],
     ["text", "string"],
-    ["time", ""],
-    ["time without time zone", ""],
-    ["time with time zone", ""],
-    ["timetz", ""],
-    ["timestamp", "Date"],
+    ["name", "string"],
+
+    // Binary Types
+    ["bytea", "Buffer"],
+    ["bit", "string"],
+    ["bit varying", "string"],
+    ["varbit", "string"],
+
+    // Boolean Type
+    ["boolean", "boolean"],
+    ["bool", "boolean"],
+
+    // Date/Time Types
+    ["date", "Date"],
+    ["time without time zone", "string"],
+    ["time", "string"],
+    ["time with time zone", "string"],
+    ["timetz", "string"],
     ["timestamp without time zone", "Date"],
+    ["timestamp", "Date"],
     ["timestamp with time zone", "Date"],
     ["timestamptz", "Date"],
-    ["tsquery", ""],
-    ["tsvector", ""],
-    ["txid_snapshot", ""],
+    ["interval", "object"],
+
+    // Geometric Types
+    ["box", "object"],
+    ["circle", "object"],
+    ["line", "object"],
+    ["lseg", "object"],
+    ["path", "object"],
+    ["point", "object"],
+    ["polygon", "object"],
+
+    // Network Address Types
+    ["cidr", "string"],
+    ["inet", "string"],
+    ["macaddr", "string"],
+    ["macaddr8", "string"],
+
+    // JSON Types
+    ["json", "object"],
+    ["jsonb", "object"],
+
+    // UUID Type
     ["uuid", "string"],
+
+    // Text Search Types
+    ["tsquery", "string"],
+    ["tsvector", "string"],
+
+    // Other Types
+    ["pg_lsn", "string"],
+    ["pg_snapshot", "string"],
+    ["txid_snapshot", "string"],
     ["xml", "string"],
 ]);
 
@@ -94,6 +117,7 @@ export const udtTypes: Map<string, string> = new Map<string, string>([
     ["character varying", "varchar"],
     ["varchar", "varchar"],
     ["text", "text"],
+    ["name", "name"],
 
     // Binary Types
     ["bytea", "bytea"],
