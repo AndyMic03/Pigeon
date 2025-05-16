@@ -97,7 +97,7 @@ export function queryMaker(baseTabs: number, variableName: string, command: stri
 }
 
 function queryBeautifier(baseTabs: number, command: string): string {
-    const regex = /(?=((?:SELECT|INSERT|UPDATE|FROM|WHERE|AND|VALUES|RETURNING).*?)(?:FROM|WHERE|AND|VALUES|RETURNING|;))/g;
+    const regex = /(?=((?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|AND|VALUES|RETURNING).*?)(?:FROM|WHERE|AND|VALUES|RETURNING|;))/g;
     let match;
     let lines = [];
     while ((match = regex.exec(command)) !== null) {

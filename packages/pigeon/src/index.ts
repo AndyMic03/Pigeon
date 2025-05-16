@@ -405,6 +405,11 @@ export function runGeneration(dir: string, db: Database, tables: Table[], enums?
             ts += createUpdate(table.schema, table.name, table.columns, keyCombination);
             ts += "\n\n";
         }
+
+        for (const column of table.columns) {
+            ts += createDelete(table.schema, table.name, column, table.columns);
+            ts += "\n\n";
+        }
         ts = ts.slice(0, -2);
 
         const regex = /import ({?.*?}?) from "(.*?)";\n/g;
@@ -777,6 +782,29 @@ function createUpdate(tableSchema: string, tableName: string, columns: Column[],
     text += "\treturn new " + className + "(\n";
     for (const column of columns)
         text += "\t\tupdateQuery.rows[0]." + column.name + ",\n";
+    text = text.slice(0, -2);
+    text += "\n";
+    text += "\t);\n";
+    text += "}";
+    return text;
+}
+
+function createDelete(tableSchema: string, tableName: string, column: Column, columns: Column[]) {
+    let text = "";
+    const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
+    text += "/**\n";
+    text += " * Deletes the " + className + " objects from the database by the value of its " + nameBeautifier(column.name) + ".\n";
+    text += " *\n";
+    text += " * @param {" + column.jsType.replace(" | null", "") + "} " + column.name + " - The value of the" + nameBeautifier(column.name) + " of the " + nameBeautifier(tableName) + " table to be updated.\n";
+    text += " * @returns {Promise<" + className + ">} - A Promise object returning the deleted " + nameBeautifier(tableName) + ".\n";
+    text += " */\n";
+    text += "export async function delete" + className + "By" + nameBeautifier(column.name).replaceAll(" ", "") + "(" + column.name + ": " + column.jsType.replace(" | null", "") + "): Promise<" + className + "> {\n";
+    const query = "DELETE FROM " + tableSchema + "." + tableName + " WHERE " + column.name + " = $1::" + column.pgType + "RETURNING *;";
+    text += queryMaker(1, "delete", query, column.name);
+    text += "\n\n";
+    text += "\treturn new " + className + "(\n";
+    for (const column of columns)
+        text += "\t\tdeleteQuery.rows[0]." + column.name + ",\n";
     text = text.slice(0, -2);
     text += "\n";
     text += "\t);\n";
