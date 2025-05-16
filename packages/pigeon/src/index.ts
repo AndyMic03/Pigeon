@@ -400,6 +400,11 @@ export function runGeneration(dir: string, db: Database, tables: Table[], enums?
         ts += createAdd(table.schema, table.name, nonDefaults, [], hardDefaults.concat(softDefaults)) + "\n\n";
         for (const softCombination of getCombinations(softDefaults))
             ts += createAdd(table.schema, table.name, nonDefaults, softCombination, hardDefaults.concat(softDefaults.filter(n => !getCombinations(softDefaults).includes([n])))) + "\n\n";
+
+        for (const keyCombination of getCombinations(keys)) {
+            ts += createUpdate(table.schema, table.name, table.columns, keyCombination);
+            ts += "\n\n";
+        }
         ts = ts.slice(0, -2);
 
         const regex = /import ({?.*?}?) from "(.*?)";\n/g;
@@ -621,12 +626,12 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: Column[]
 
     text += " * @returns {Promise<" + className + ">} - A Promise object returning the inserted " + nameBeautifier(tableName) + ".\n";
     if (hasForeign) {
-        text += " * @throws string An exception in the case of the "
+        text += " * @throws string An exception in the case of the ";
         for (const column of columns)
             if (column.isForeign)
-                text += nameBeautifier(column.name) + " or the "
+                text += nameBeautifier(column.name) + " or the ";
         text = text.slice(0, -8);
-        text += " not existing in their table.\n"
+        text += " not existing in their table.\n";
     }
     text += " */\n";
     text += "export async function add" + className;
@@ -681,6 +686,97 @@ function createAdd(tableSchema: string, tableName: string, nonDefaults: Column[]
     columns.sort((a, b) => a.position - b.position);
     for (const column of columns)
         text += "\t\tinsertQuery.rows[0]." + column.name + ",\n";
+    text = text.slice(0, -2);
+    text += "\n";
+    text += "\t);\n";
+    text += "}";
+    return text;
+}
+
+function createUpdate(tableSchema: string, tableName: string, columns: Column[], keys: Column[]) {
+    const optionals = columns.filter(column => !keys.includes(column));
+    let text = "";
+    const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
+    let hasForeign = false;
+    for (const column of columns) {
+        if (column.isForeign && column.foreignColumn && column.foreignTable && column.foreignSchema) {
+            hasForeign = true;
+            if ((tableSchema === column.foreignSchema) && (tableName === column.foreignTable))
+                continue;
+            text += "import {get" + nameBeautifier(column.foreignTable).replaceAll(" ", "") + "By" + nameBeautifier(column.foreignColumn).replaceAll(" ", "") + "} from \".";
+            if (tableSchema !== column.foreignSchema)
+                text += "./" + column.foreignSchema;
+            text += "/" + column.foreignTable + ".js\";\n";
+        }
+    }
+    text += "/**\n";
+    text += " * Updates the " + className + " objects from the database by ";
+    for (const key of keys)
+        text += key.name + " and ";
+    text = text.slice(0, -5) + ".\n";
+    text += " *\n";
+    for (const key of keys)
+        text += " * @param {" + key.jsType.replace(" | null", "") + "} " + key.name + " - The " + nameBeautifier(key.name) + " of the " + nameBeautifier(tableName) + " table to be updated.\n";
+    for (const optional of optionals)
+        text += " * @param {" + optional.jsType + " | undefined} " + optional.name + " - The value of the" + nameBeautifier(optional.name) + " of the " + nameBeautifier(tableName) + " table to be updated.\n";
+    text += " * @returns {Promise<" + className + ">} - A Promise object returning the updated " + nameBeautifier(tableName) + ".\n";
+    if (hasForeign) {
+        text += " * @throws string An exception in the case of the ";
+        for (const column of columns)
+            if (column.isForeign)
+                text += nameBeautifier(column.name) + " or the ";
+        text = text.slice(0, -8);
+        text += " not existing in their table.\n"
+    }
+    text += " */\n";
+    text += "export async function update" + className + "By";
+    for (const key of keys)
+        text += nameBeautifier(key.name).replaceAll(" ", "") + "And";
+    text = text.slice(0, -3);
+    text += "(";
+    for (const key of keys)
+        text += key.name + ": " + key.jsType.replace(" | null", "") + ", ";
+    for (const optional of optionals)
+        text += optional.name + "?: " + optional.jsType + " | undefined, ";
+    text = text.slice(0, -2);
+    text += "): Promise<" + className + "> {\n";
+    if (hasForeign) {
+        for (const column of columns) {
+            if (column.isForeign && column.foreignColumn && column.foreignTable && column.foreignSchema) {
+                const name = nameBeautifier(column.name).replaceAll(" ", "");
+                if (!keys.includes(column)) {
+                    text += "\tif (" + column.name + ") {\n";
+                    text += "\t\tconst verify" + name + " = await get" + nameBeautifier(column.foreignTable).replaceAll(" ", "") + "By" + nameBeautifier(column.foreignColumn).replaceAll(" ", "") + "(" + column.name + ");\n";
+                    text += "\t\tif (verify" + name + ".length === 0)\n";
+                    text += "\t\t\tthrow \"The " + nameBeautifier(column.name) + " provided does not exist.\";\n";
+                    text += "\t}\n\n"
+                } else {
+                    text += "\tconst verify" + name + " = await get" + nameBeautifier(column.foreignTable).replaceAll(" ", "") + "By" + nameBeautifier(column.foreignColumn).replaceAll(" ", "") + "(" + column.name + ");\n";
+                    text += "\tif (verify" + name + ".length === 0)\n";
+                    text += "\t\tthrow \"The " + nameBeautifier(column.name) + " provided does not exist.\";\n\n";
+                }
+            }
+        }
+    }
+    text += "\tlet set = \"\";\n";
+    for (let optional of optionals) {
+        text += "\tif (" + optional.name + " !== undefined)\n";
+        text += "\t\tset += \"" + optional.name + " = '\" + " + optional.name + " + \"', \";\n";
+    }
+    text += "\tset = set.slice(0, -2);\n";
+    let parameters = "";
+    let query = "UPDATE " + tableSchema + "." + tableName + ` SET \$\{set\} WHERE `
+    for (let i = 0; i < keys.length; i++) {
+        query += keys[i].name + " = " + "$" + (i + 1) + "::" + keys[i].pgType + " AND ";
+        parameters += keys[i].name + ", ";
+    }
+    parameters = parameters.slice(0, -2);
+    query = query.slice(0, -5) + " RETURNING *;"
+    text += queryMaker(1, "update", query, parameters);
+    text += "\n\n";
+    text += "\treturn new " + className + "(\n";
+    for (const column of columns)
+        text += "\t\tupdateQuery.rows[0]." + column.name + ",\n";
     text = text.slice(0, -2);
     text += "\n";
     text += "\t);\n";

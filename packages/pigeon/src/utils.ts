@@ -97,7 +97,7 @@ export function queryMaker(baseTabs: number, variableName: string, command: stri
 }
 
 function queryBeautifier(baseTabs: number, command: string): string {
-    const regex = /(?=((?:SELECT|INSERT|FROM|WHERE|AND|VALUES|RETURNING).*?)(?:FROM|WHERE|AND|VALUES|RETURNING|;))/g;
+    const regex = /(?=((?:SELECT|INSERT|UPDATE|FROM|WHERE|AND|VALUES|RETURNING).*?)(?:FROM|WHERE|AND|VALUES|RETURNING|;))/g;
     let match;
     let lines = [];
     while ((match = regex.exec(command)) !== null) {
@@ -184,7 +184,7 @@ export function getJSType(dataType: string, udtName: string, isNullable: boolean
     if (isArray)
         foundDataType += "[]";
     if (isNullable)
-        foundDataType += " | undefined";
+        foundDataType += " | null";
     return foundDataType;
 }
 
@@ -216,8 +216,8 @@ export function getPGType(dataType: string, udtName?: string): string {
     if (dataType === "int")
         dataType = "integer";
     let pgType = udtName;
-    if (dataType.endsWith("[]"))
-        pgType = pgType.slice(1) + "[]";
+    if (dataType.endsWith("[]") || dataType === "ARRAY")
+        pgType = (udtTypes.get(pgType.slice(1)) || pgType.slice(1)) + "[]";
     else if (dataType !== "USER-DEFINED")
         pgType = dataType;
     return pgType;
