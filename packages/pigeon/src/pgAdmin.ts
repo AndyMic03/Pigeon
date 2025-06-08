@@ -69,7 +69,7 @@ export function tableProcessing(tables: any[]): Table[] {
                 isNullable = false;
 
             const jsType = getJSType(types.dataType, types.udtName, isNullable);
-            const pgType = getPGType(types.dataType);
+            const pgType = getPGType(types.dataType, types.udtName);
 
             if (column.cltype.includes("serial"))
                 column.defval = "nextval('" + data.name + "_" + column.name + "_seq'::regclass)";

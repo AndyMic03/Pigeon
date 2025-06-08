@@ -80,48 +80,6 @@ export function tabsInserter(tabNumber: number): string {
     return tabs;
 }
 
-export function queryMaker(baseTabs: number, variableName: string, command: string, parameters: string): string {
-    let query: string = "";
-    query += tabsInserter(baseTabs) + "let " + variableName + "Query;\n";
-    query += tabsInserter(baseTabs) + "try {\n";
-    query += tabsInserter(baseTabs + 1) + "await client.connect();\n";
-    query += tabsInserter(baseTabs + 1) + variableName + "Query = await client.query(`\n";
-    query += queryBeautifier(baseTabs + 2, command);
-    query += tabsInserter(baseTabs + 1) + "`, [" + parameters + "]);\n";
-    query += tabsInserter(baseTabs) + "} catch (error: any) {\n";
-    query += tabsInserter(baseTabs + 1) + "throw error;\n";
-    query += tabsInserter(baseTabs) + "} finally {\n";
-    query += tabsInserter(baseTabs + 1) + "await client.end();\n";
-    query += tabsInserter(baseTabs) + "}";
-    return query;
-}
-
-function queryBeautifier(baseTabs: number, command: string): string {
-    const regex = /(?=((?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|AND|VALUES|RETURNING).*?)(?:FROM|WHERE|AND|VALUES|RETURNING|;))/g;
-    let match;
-    let lines = [];
-    while ((match = regex.exec(command)) !== null) {
-        lines.push(match[1]);
-        regex.lastIndex = regex.lastIndex + 1;
-    }
-    for (let i = 0; i < lines.length; i++)
-        if (lines[i][lines[i].length - 1] === " ")
-            lines[i] = lines[i].slice(0, -1);
-
-    lines[lines.length - 1] = lines[lines.length - 1] + ";";
-    let maxLength = 0;
-    for (const line of lines)
-        if (line.split(" ")[0].length > maxLength)
-            maxLength = line.split(" ")[0].length;
-    for (let i = 0; i < lines.length; i++)
-        if (lines[i].split(" ")[0].length < maxLength)
-            lines[i] = " ".repeat(maxLength - lines[i].split(" ")[0].length) + lines[i];
-    let formated = "";
-    for (const line of lines)
-        formated += tabsInserter(baseTabs) + line + "\n"
-    return formated;
-}
-
 export function arrayMaker(baseTabs: number, variableName: string, className: string, columns: Column[]): string {
     let array: string = "";
     array += tabsInserter(baseTabs) + "let " + variableName + ": " + className + "[] = [];\n";
@@ -148,25 +106,6 @@ export function singularize(word: string) {
         new RegExp(`(${Object.keys(endings).join('|')})$`),
         r => endings[r]
     );
-}
-
-export function getCombinations(valuesArray: any[]): any[][] {
-    let combinations: any[][] = [];
-    let temp: any[] = [];
-    let possibleCombinations = Math.pow(2, valuesArray.length);
-
-    for (let i = 0; i < possibleCombinations; i++) {
-        temp = [];
-        for (let j = 0; j < valuesArray.length; j++)
-            if ((i & Math.pow(2, j)))
-                temp.push(valuesArray[j]);
-
-        if (temp.length > 0)
-            combinations.push(temp);
-    }
-
-    combinations.sort((a, b) => a.length - b.length);
-    return combinations;
 }
 
 export function getJSType(dataType: string, udtName: string, isNullable: boolean): string {

@@ -20,7 +20,8 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {
-    "@types/pg": "^8.15.1",
+    "pg": "^8.16.0",
+    "@types/pg": "^8.15.4",
     "@types/prompt-sync": "^4.2.3",
     "lerna": "^8.2.2",
     "typescript": "^5.8.3"
