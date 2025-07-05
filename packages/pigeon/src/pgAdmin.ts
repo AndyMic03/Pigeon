@@ -92,7 +92,7 @@ export function tableProcessing(tables: any[]): Table[] {
             }
 
             let isPrimary = false;
-            if (column.name === data.primary_key[0].columns[0].column)
+            if (column.name === data.primary_key[0]?.columns[0].column)
                 isPrimary = true;
 
             let isForeign = false;
