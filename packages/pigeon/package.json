@@ -1,6 +1,6 @@
 {
   "name": "@andymic/pigeon",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": "Andreas Michael <ateasm03@gmail.com>",
   "description": "Pigeon is a TypeScript-based tool for generating TypeScript classes and methods from PostgreSQL database schemas.",
   "keywords": [
