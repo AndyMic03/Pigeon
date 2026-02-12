@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2025 Andreas Michael
+ * Copyright (c) 2025-2026 Andreas Michael
  * This software is under the Apache 2.0 License
  */
 
-import {Column, PigeonError, Table,} from "./index.js";
+import {Column, PigeonError, Table} from "./index.js";
 import {getJSType, getPGType, getTypesByDataType} from "./utils.js";
 
 function objectToArray(json: string) {
@@ -60,7 +60,7 @@ export function tableProcessing(tables: any[]): Table[] {
     for (const table of tables) {
         const data = table.otherInfo.data;
         const columns: Column[] = [];
-        let ordinalPossition = 1;
+        let ordinalPosition = 1;
         for (const column of data.columns) {
             const types = getTypesByDataType(column.cltype);
 
@@ -118,8 +118,8 @@ export function tableProcessing(tables: any[]): Table[] {
                         if (uniqueColumn.column === column.name)
                             isUnique = true;
 
-            columns.push(new Column(column.name, ordinalPossition, columnDefault, isNullable, jsType, pgType, identity, identityGeneration, isPrimary, isUnique, isForeign, foreignSchema, foreignTable, foreignColumn));
-            ordinalPossition++;
+            columns.push(new Column(column.name, ordinalPosition, columnDefault, isNullable, jsType, pgType, identity, identityGeneration, isPrimary, isUnique, isForeign, foreignSchema, foreignTable, foreignColumn));
+            ordinalPosition++;
         }
 
         pigeonTables.push(new Table(data.name, data.schema, columns));

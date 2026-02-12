@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Andreas Michael
+ * Copyright (c) 2025-2026 Andreas Michael
  * This software is under the Apache 2.0 License
  */
 
@@ -378,7 +378,26 @@ export function runGeneration(dir: string, db: Database, tables: Table[], enums?
             }
         }
 
-        ts += createClass(table.name, table.columns);
+        let generatedClass = createClass(table.name, table.columns);
+        const importMatches = RegExp(/import {v[47] as uuidv[47]} from "uuid";\n/gd).exec(generatedClass)
+        if (importMatches) {
+            let is4Processed = false;
+            let is7Processed = false;
+            const matches = importMatches.reverse();
+            const indices = importMatches.indices?.reverse()!;
+            for (let i = 0; i < importMatches.length; i++) {
+                if (matches[i].includes("4") && !is4Processed) {
+                    ts = matches[i] + "\n" + ts;
+                    is4Processed = true;
+                }
+                if (matches[i].includes("7") && !is7Processed) {
+                    ts = matches[i] + "\n" + ts;
+                    is7Processed = true;
+                }
+                generatedClass = generatedClass.slice(0, indices[i][0]) + generatedClass.slice(indices[i][1])
+            }
+        }
+        ts += generatedClass;
         ts += "\n\n";
 
         ts += createGetTypecast(table.columns);
@@ -461,7 +480,8 @@ function createIndex(db: Database) {
 
 function createClass(tableName: string, columns: Column[]): string {
     let text = "";
-    text += "export class " + singularize(nameBeautifier(tableName)).replaceAll(" ", "") + " {\n";
+    const className = singularize(nameBeautifier(tableName)).replaceAll(" ", "");
+    text += "export class " + className + " {\n";
     for (const column of columns) {
         text += "\t/**\n";
         if (column.isPrimary)
@@ -484,10 +504,87 @@ function createClass(tableName: string, columns: Column[]): string {
                 if (column.jsType === "Date") {
                     if (columnDefault.toLowerCase() === "now()")
                         text += " = new Date()";
-                    else
+                    else if (RegExp(/now\(\) \+ interval '(?:\d*? (?:microseconds?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|years?) ?)*?'/).test(columnDefault.toLowerCase())) {
+                        if (columnDefault.toLowerCase().match(/months?|years?/) && !text.includes("private static now = new Date();")) {
+                            text = text.slice(0, ("export class " + className + " {\n").length);
+                            text += "\t/**\n";
+                            text += "\t * A helper object to calculate default dates.\n";
+                            text += "\t*/\n";
+                            text += "\tprivate static now = new Date();\n";
+                            text += text.slice(("export class " + className + " {\n").length);
+                        }
+
+                        const matches = RegExp(/(\d+) (microseconds?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|years?)/gm).exec(columnDefault.toLowerCase());
+
+                        let milliseconds = "new Date().getTime()";
+
+                        const groups = [];
+                        for (let i = 0; i < matches!.length; i += 3) {
+                            groups.push(matches!.slice(i, i + 3));
+                        }
+
+                        for (const group of groups) {
+                            const number = Number(group[1]);
+                            const unit = group[2];
+
+                            switch (unit) {
+                                case "microsecond":
+                                case "microseconds":
+                                    if (number >= 500)
+                                        milliseconds += " + 1";
+                                    break;
+                                case "millisecond":
+                                case "milliseconds":
+                                    milliseconds += " + " + number;
+                                    break;
+                                case "second":
+                                case "seconds":
+                                    milliseconds += " + " + number + " * 1000";
+                                    break;
+                                case "minute":
+                                case "minutes":
+                                    milliseconds += " + " + number + " * 1000 * 60";
+                                    break;
+                                case "hour":
+                                case "hours":
+                                    milliseconds += " + " + number + " * 1000 * 60 * 60";
+                                    break;
+                                case "day":
+                                case "days":
+                                    milliseconds += " + " + number + " * 1000 * 60 * 60 * 24";
+                                    break;
+                                case "week":
+                                case "weeks":
+                                    milliseconds += " + " + number + " * 1000 * 60 * 60 * 24 * 7";
+                                    break;
+                                case "month":
+                                case "months":
+                                    milliseconds += " + " + number + " * 1000 * 60 * 60 * 24 * (now.getFullYear(), now.getMonth() + 1, 0).getDate())";
+                                    break;
+                                case "year":
+                                case "years":
+                                    milliseconds += " + " + number + " * 1000 * 60 * 60 * 24 * (((now.getFullYear() % 4 === 0 && now.getFullYear() % 100 !== 0) || (now.getFullYear() % 400 === 0)) ? 366 : 365)";
+                                    break;
+                            }
+
+                            text += " = new Date(" + milliseconds + ")";
+                        }
+                    } else {
                         text += " = new Date(" + columnDefault.replace(" ", "T") + ")";
+                    }
                 } else if (column.jsType.includes("number") || column.jsType.includes("boolean"))
                     text += " = " + columnDefault;
+                else if (column.pgType === "uuid") {
+                    if (column.pgType === "uuid") {
+                        if (columnDefault.toLowerCase() === "gen_random_uuid()" || columnDefault.toLowerCase() === "uuidv4()") {
+                            text += "import {v4 as uuidv4} from \"uuid\";\n";
+                            text += " = uuidv4()";
+                        } else if (columnDefault.toLowerCase() === "uuidv7()") {
+                            text += "import {v7 as uuidv7} from \"uuid\";\n";
+                            text += " = uuidv7()";
+                        }
+                    }
+                }
                 else if (type) {
                     if (jsTypes.get(type) === "string")
                         text += " = \"" + columnDefault + "\"";
