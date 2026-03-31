@@ -32,8 +32,8 @@
   },
   "dependencies": {
     "meow": "^14.0.0",
-    "pg": "^8.18.0",
+    "pg": "^8.20.0",
     "prompt-sync": "^4.2.0"
   },
-  "gitHead": "be8deef452356329e61d7d6e6caaebbe2beb5498"
+  "gitHead": "951ece18edb4d33960490b857952d3c3db923b68"
 }
